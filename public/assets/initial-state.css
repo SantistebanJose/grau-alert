@@ -1,0 +1,44 @@
+.app-loading {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  background: #f5f6f9;
+  color: #7b8498;
+  font: 500 13px/1.4 "DM Sans", sans-serif;
+}
+
+.app-loading b {
+  color: #102454;
+  font: 800 18px/1.2 Manrope, "DM Sans", sans-serif;
+}
+
+.app-loading-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 4px;
+  border: 2px solid #e7bd26;
+  border-radius: 50%;
+  color: #e7bd26;
+  background: #102454;
+  font: 800 17px Georgia, serif;
+}
+
+.app-loading-spinner {
+  width: 19px;
+  height: 19px;
+  border: 2px solid #dfe4ef;
+  border-top-color: #e7bd26;
+  border-radius: 50%;
+  animation: grau-spin .75s linear infinite;
+}
+
+@keyframes grau-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

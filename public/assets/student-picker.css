@@ -1,0 +1,197 @@
+.student-picker {
+  position: relative;
+}
+
+.student-picker > input[type="search"] {
+  width: 100%;
+  height: 42px;
+  padding: 0 13px;
+  border: 1px solid #dfe2e9;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  outline: 0;
+  font-size: 12px;
+}
+
+.student-picker > input[type="search"]:focus {
+  border-color: #6679b1;
+  box-shadow: 0 0 0 3px #10245412;
+}
+
+.student-picker-results {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  max-height: 310px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid #e2e6ef;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 32px #15234b20;
+}
+
+.student-picker-option {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 0;
+  border-radius: 7px;
+  background: #fff;
+  color: #25314c;
+  text-align: left;
+  cursor: pointer;
+}
+
+.student-picker-option:hover,
+.student-picker-option:focus-visible {
+  outline: 0;
+  background: #f1f4fa;
+}
+
+.student-picker-option b {
+  font-size: 12px;
+}
+
+.student-picker-option small,
+.student-picker-hint {
+  color: #7b8498;
+  font-size: 10px;
+}
+
+.student-picker-hint {
+  padding: 12px;
+}
+
+.student-picker-picked {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border: 1px solid #dce9e1;
+  border-radius: 8px;
+  background: #f2f8f4;
+  color: #547060;
+  font-size: 10px;
+}
+
+.student-picker-picked b {
+  margin-right: auto;
+  color: #263d31;
+  font-size: 11px;
+}
+
+.student-picker-clear {
+  border: 0;
+  background: transparent;
+  color: #102454;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.guardian-credential-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #cfe7d6;
+  border-radius: 9px;
+  background: #f1f8f3;
+}
+
+.guardian-credential-result > div {
+  display: grid;
+  gap: 5px;
+  color: #42604b;
+  font-size: 11px;
+}
+
+.guardian-credential-result code {
+  color: #102454;
+  font: 800 15px/1.3 "DM Sans", sans-serif;
+  letter-spacing: .08em;
+  user-select: all;
+}
+
+.guardian-credential-result .btn {
+  padding: 8px 11px;
+  font-size: 11px;
+}
+
+#page-community .compact-form > label[for="guardian-student-search"] {
+  margin-bottom: -9px;
+}
+
+#page-reports .report-wa {
+  padding: 7px 10px;
+  border: 1px solid #bfe5cf;
+  background: #eaf7ef;
+  color: #137344;
+  font-size: 10px;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.badge.late-badge {
+  background: #fff3d8;
+  color: #986500;
+}
+
+#page-reports .report-wa:hover {
+  border-color: #91d1aa;
+  background: #dcf2e4;
+}
+
+#page-reports .report-no-phone {
+  color: #939bad;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+#page-reports .report-notice-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#page-reports .report-mark-sent {
+  padding: 7px 9px;
+  color: #52627d;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+#page-reports .report-sent {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: #eaf7ef;
+  color: #137344;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+#page-scanner .scanner-whatsapp {
+  width: 100%;
+  margin-top: 9px;
+  border: 1px solid #bfe5cf;
+  background: #eaf7ef;
+  color: #137344;
+  text-decoration: none;
+}
+
+#page-scanner .scanner-whatsapp:hover {
+  background: #dcf2e4;
+}

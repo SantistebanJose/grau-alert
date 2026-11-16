@@ -1,0 +1,112 @@
+/* Student directory filters: institutional segmented controls. */
+#page-students .content-card {
+  padding-top: 22px;
+}
+
+#page-students .student-filters {
+  display: grid;
+  gap: 13px;
+  margin: 0 0 21px;
+}
+
+#page-students .student-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#page-students .student-level-tabs {
+  display: inline-flex;
+  width: fit-content;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid #e2e7f0;
+  border-radius: 13px;
+  background: #f1f4f9;
+}
+
+#page-students .student-tab {
+  appearance: none;
+  min-height: 39px;
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: #69758e;
+  font: 700 12px/1.2 "DM Sans", sans-serif;
+  cursor: pointer;
+  transition: color .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+#page-students .student-level-tabs .student-tab {
+  min-width: 132px;
+  min-height: 42px;
+  font-size: 13px;
+}
+
+#page-students .student-tab:hover {
+  color: #102454;
+  border-color: #dce3ef;
+  background: #fff;
+}
+
+#page-students .student-tab:focus-visible {
+  outline: 3px solid #e7bd2670;
+  outline-offset: 2px;
+}
+
+#page-students .student-tab.active {
+  color: #fff;
+  border-color: #102454;
+  background: linear-gradient(135deg, #1c3470, #102454);
+  box-shadow: 0 4px 10px #10245420, inset 0 -3px 0 #e7bd26;
+}
+
+#page-students .student-level-tabs .student-tab.active {
+  box-shadow: 0 3px 8px #10245420, inset 0 -3px 0 #e7bd26;
+}
+
+#page-students .student-grade-tabs {
+  gap: 7px;
+}
+
+#page-students .student-grade-tabs .student-tab {
+  min-height: 34px;
+  padding: 7px 13px;
+  border-color: #e4e8f0;
+  background: #fff;
+  color: #606b83;
+  font-size: 11px;
+}
+
+#page-students .student-grade-tabs .student-tab:hover {
+  border-color: #c5cee0;
+  background: #f7f8fb;
+}
+
+#page-students .student-grade-tabs .student-tab.active {
+  color: #102454;
+  border-color: #f1dc83;
+  background: #fff8dc;
+  box-shadow: inset 0 0 0 1px #f7e8a9;
+}
+
+@media (max-width: 650px) {
+  #page-students .student-level-tabs {
+    width: 100%;
+  }
+
+  #page-students .student-level-tabs .student-tab {
+    flex: 1;
+    min-width: 0;
+  }
+
+  #page-students .student-grade-tabs {
+    gap: 6px;
+  }
+
+  #page-students .student-grade-tabs .student-tab {
+    padding-inline: 10px;
+  }
+}

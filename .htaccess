@@ -1,0 +1,6 @@
+Options -Indexes
+
+# Los documentos fuente y los archivos de configuración no son parte del sitio público.
+<FilesMatch "(?i)\.(xlsx|pptx|docx|sql|md)$|^(config(\.local)?\.php)$">
+    Require all denied
+</FilesMatch>
