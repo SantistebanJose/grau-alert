@@ -140,8 +140,7 @@ try {
                 if (!$isActive) { $pdo->rollBack(); respond(['error' => 'La cuenta de apoderado de ese correo está desactivada.'], 409); }
                 $guardian = $existing;
             } else {
-                $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-                for ($i = 0; $i < 12; $i++) $temporaryPassword .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+                $temporaryPassword = '12345678';
                 $stmt = $pdo->prepare("insert into public.usuarios (correo,password_hash,nombres,apellidos,telefono,rol) values (:email,:hash,:nombres,:apellidos,:telefono,'apoderado') returning id,correo,nombres,apellidos,telefono,rol");
                 $stmt->execute(['email' => $email, 'hash' => password_hash($temporaryPassword, PASSWORD_DEFAULT), 'nombres' => $names, 'apellidos' => $last, 'telefono' => trim((string)($data['telefono'] ?? '')) ?: null]);
                 $guardian = $stmt->fetch(); $createdAccount = true;
@@ -188,7 +187,7 @@ try {
                         $updateGuardian = $pdo->prepare('update public.usuarios set nombres=:names,apellidos=:last,telefono=coalesce(nullif(:phone,\'\'),telefono),activo=true where id=:id');
                         $updateGuardian->execute(['names' => $names, 'last' => $last, 'phone' => $phone, 'id' => $guardianId]);
                     } else {
-                        $temporaryPassword = bin2hex(random_bytes(8));
+                        $temporaryPassword = '12345678';
                         $createGuardian = $pdo->prepare("insert into public.usuarios (correo,password_hash,nombres,apellidos,telefono,rol) values (:email,:hash,:names,:last,:phone,'apoderado') returning id");
                         $createGuardian->execute(['email' => $email, 'hash' => password_hash($temporaryPassword, PASSWORD_DEFAULT), 'names' => $names, 'last' => $last, 'phone' => $phone ?: null]);
                         $guardianId = $createGuardian->fetchColumn(); $created++;
@@ -211,6 +210,17 @@ try {
         require_user(['administrador']);
         $rows = $pdo->query("select u.id,u.correo,u.nombres,u.apellidos,u.telefono,u.activo,e.id as estudiante_id,e.dni,e.codigo,e.nombres as estudiante_nombres,e.apellidos as estudiante_apellidos,g.nombre as grado,ea.parentesco,ea.contacto_principal from public.usuarios u join public.estudiante_apoderados ea on ea.apoderado_id=u.id join public.estudiantes e on e.id=ea.estudiante_id left join public.grados g on g.id=e.grado_id where u.rol='apoderado' and e.activo=true order by u.apellidos,e.apellidos")->fetchAll();
         respond(['guardians' => $rows]);
+    }
+    if ($action === 'guardian_reset_password' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        require_user(['administrador']);
+        $guardianId = trim((string)($data['guardian_id'] ?? ''));
+        if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $guardianId)) respond(['error' => 'Apoderado no válido.'], 422);
+        $temporaryPassword = '12345678';
+        $stmt = $pdo->prepare("update public.usuarios set password_hash=:hash where id=:id and rol='apoderado' and activo=true returning correo");
+        $stmt->execute(['hash' => password_hash($temporaryPassword, PASSWORD_DEFAULT), 'id' => $guardianId]);
+        $email = $stmt->fetchColumn();
+        if (!$email) respond(['error' => 'No encontramos una cuenta activa de apoderado.'], 404);
+        respond(['ok' => true, 'correo' => $email, 'temporary_password' => $temporaryPassword]);
     }
     if ($action === 'guardian_link' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         require_user(['administrador']);
@@ -235,6 +245,20 @@ try {
             $summary[$key]++;
         }
         respond(['summary' => $summary, 'rows' => $rows]);
+    }
+    if ($action === 'report_period' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        require_user(['administrador','tutor']);
+        $anchor = (string)($_GET['date'] ?? date('Y-m-d'));
+        $period = (string)($_GET['period'] ?? 'day');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $anchor) || !in_array($period, ['day','week','month'], true)) respond(['error' => 'Período de reporte no válido.'], 422);
+        $date = new DateTimeImmutable($anchor, new DateTimeZone('America/Lima'));
+        $start = $period === 'week' ? $date->modify('monday this week')->format('Y-m-d') : ($period === 'month' ? $date->modify('first day of this month')->format('Y-m-d') : $anchor);
+        $end = $period === 'week' ? $date->modify('sunday this week')->format('Y-m-d') : ($period === 'month' ? $date->modify('last day of this month')->format('Y-m-d') : $anchor);
+        $stmt = $pdo->prepare("select e.id as estudiante_id,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,g.nombre as grado,g.nivel,count(a.id) filter(where a.estado in ('presente','tardanza')) as asistencias,count(a.id) filter(where a.estado='presente') as presentes,count(a.id) filter(where a.estado='tardanza') as tardanzas,count(a.id) filter(where a.estado='falta') as faltas,count(a.id) filter(where a.estado='justificada') as justificadas,coalesce(json_agg(json_build_object('fecha',a.fecha,'estado',a.estado,'hora',case when a.estado='falta' then null else a.hora_ingreso end) order by a.fecha) filter(where a.id is not null),'[]'::json) as detalle from public.estudiantes e left join public.grados g on g.id=e.grado_id left join public.asistencias a on a.estudiante_id=e.id and a.fecha between :start and :finish where e.activo=true group by e.id,g.nombre,g.nivel order by case lower(g.nivel) when 'primaria' then 1 when 'secundaria' then 2 else 3 end,g.nombre,e.apellidos,e.nombres");
+        $stmt->execute(['start' => $start, 'finish' => $end]); $rows = $stmt->fetchAll();
+        $summary = ['inicio' => $start, 'fin' => $end, 'matriculados' => count($rows), 'presentes' => 0, 'tardanzas' => 0, 'faltas' => 0, 'justificadas' => 0];
+        foreach ($rows as &$row) { foreach (['asistencias','presentes','tardanzas','faltas','justificadas'] as $field) { $row[$field] = (int)$row[$field]; } if (is_string($row['detalle'])) $row['detalle'] = json_decode($row['detalle'], true) ?: []; foreach (['presentes','tardanzas','faltas','justificadas'] as $field) $summary[$field] += $row[$field]; }
+        unset($row); respond(['summary' => $summary, 'rows' => $rows]);
     }
     if ($action === 'calendar' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $rows = $pdo->query("select fecha,estado,evento,alarma_activa from public.calendario_escolar where fecha >= date_trunc('year',current_date)::date - interval '1 year' and fecha < date_trunc('year',current_date)::date + interval '3 years' order by fecha")->fetchAll();
@@ -495,9 +519,14 @@ try {
         $token = trim((string)($data['token'] ?? ''));
         if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $token)) respond(['error' => 'Este código no corresponde a un carné QR de Grau-Alert.'], 422);
         $now = new DateTimeImmutable('now', new DateTimeZone('America/Lima'));
-        $lateAfter = trim((string)(getenv('SCHOOL_LATE_AFTER') ?: '07:30'));
-        if (!preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $lateAfter)) $lateAfter = '07:30';
-        $status = $now->format('H:i') > $lateAfter ? 'tardanza' : 'presente';
+        $gradeInfo = $pdo->prepare("select lower(g.nivel) nivel from public.estudiantes e left join public.grados g on g.id=e.grado_id where e.qr_token=:token and e.activo=true");
+        $gradeInfo->execute(['token' => $token]); $level = $gradeInfo->fetchColumn();
+        if (!$level) respond(['error' => 'QR no reconocido o estudiante inactivo.'], 404);
+        $schedule = $level === 'primaria' ? ['start' => '08:00', 'open' => '06:40', 'end' => '13:00', 'grace' => 0] : ['start' => '07:00', 'open' => '06:30', 'end' => '14:30', 'grace' => 5];
+        $clock = $now->format('H:i');
+        if ($clock < $schedule['open'] || $clock > $schedule['end']) respond(['error' => 'El horario de ingreso para este nivel es de ' . $schedule['open'] . ' a ' . $schedule['end'] . '.'], 409);
+        $lateAfter = (new DateTimeImmutable($schedule['start']))->modify('+' . $schedule['grace'] . ' minutes')->format('H:i');
+        $status = $clock > $lateAfter ? 'tardanza' : 'presente';
         $pdo->beginTransaction();
         $stmt = $pdo->prepare("insert into public.asistencias (estudiante_id,estado,metodo,verificado_por) select id,:status,'qr',:uid from public.estudiantes where qr_token=:token and activo=true on conflict (estudiante_id,fecha) do update set estado=:status2,metodo='qr',hora_ingreso=now(),verificado_por=excluded.verificado_por,observacion='Ingreso confirmado tras marca de falta' where public.asistencias.estado='falta' returning id,hora_ingreso,estado");
         $stmt->execute(['uid' => $user['id'], 'token' => $token, 'status' => $status, 'status2' => $status]);

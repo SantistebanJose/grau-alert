@@ -1,0 +1,10 @@
+{
+  "name": "Grau-Alert",
+  "short_name": "Grau-Alert",
+  "start_url": "/familia.php",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f6f9",
+  "theme_color": "#102454",
+  "icons": [{"src":"/public/assets/img/mgs.jpg","sizes":"192x192","type":"image/jpeg","purpose":"any"}]
+}

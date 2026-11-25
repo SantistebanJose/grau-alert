@@ -283,7 +283,19 @@
       const [staff, guardians, students] = await Promise.all([request('staff'), request('guardians'), request('students')]);
       state.communityStudents = students.students;
       $('#staff-rows').innerHTML = staff.staff.map(u => `<tr><td>${esc(`${u.nombres} ${u.apellidos}`)}</td><td>${esc(u.correo)}</td><td>${esc(u.rol)}</td><td>${esc(u.telefono || '—')}</td></tr>`).join('');
-      $('#guardian-rows').innerHTML = guardians.guardians.map(g => `<tr><td>${esc(`${g.nombres} ${g.apellidos}`)}<small>${esc(g.correo)}</small></td><td>${esc(`${g.estudiante_nombres} ${g.estudiante_apellidos}`)}</td><td>${esc(g.grado || '—')}</td><td>${esc(g.telefono || '—')}${g.contacto_principal ? ' · Principal' : ''}</td></tr>`).join('');
+      $('#guardian-rows').innerHTML = guardians.guardians.map(g => `<tr><td>${esc(`${g.nombres} ${g.apellidos}`)}</td><td>${esc(g.correo)}</td><td>${esc(`${g.estudiante_nombres} ${g.estudiante_apellidos}`)}</td><td>${esc(g.grado || '—')}</td><td>${esc(g.telefono || '—')}${g.contacto_principal ? ' · Principal' : ''}</td><td><button type="button" class="btn btn-ghost guardian-reset-password" data-guardian-id="${esc(g.id)}">Nueva clave</button></td></tr>`).join('');
+      $$('.guardian-reset-password').forEach(button => button.addEventListener('click', async () => {
+        if (!confirm('Se reemplazará la clave actual. ¿Generar una nueva clave temporal?')) return;
+        button.disabled = true;
+        try {
+          const result = await request('guardian_reset_password', { method: 'POST', data: { guardian_id: button.dataset.guardianId } });
+          $('#guardian-reset-email').textContent = result.correo;
+          $('#guardian-reset-password').textContent = result.temporary_password;
+          $('#guardian-reset-result').classList.remove('hidden');
+          toast('Clave temporal generada. Cópiala y compártela con el apoderado.');
+        } catch (error) { toast(error.message, true); }
+        finally { button.disabled = false; }
+      }));
       $('#guardian-student-search').value = ''; $('#guardian-student-select').value = ''; $('#guardian-student-picked').classList.add('hidden');
     } catch (e) { toast(e.message, true); }
   }
@@ -364,6 +376,11 @@
     const password = $('#guardian-temporary-password').textContent;
     try { await navigator.clipboard.writeText(password); toast('Clave temporal copiada.'); }
     catch (_) { toast('No se pudo copiar; selecciona y copia la clave manualmente.', true); }
+  });
+  $('#copy-guardian-reset-password').addEventListener('click', async () => {
+    const password = $('#guardian-reset-password').textContent;
+    try { await navigator.clipboard.writeText(password); toast('Clave copiada.'); }
+    catch { window.prompt('Copia la clave temporal:', password); }
   });
   let communityImportRows = null;
   $('#community-import-btn').addEventListener('click', () => {
@@ -460,6 +477,28 @@
     gradeSelect.innerHTML = '<option value="todos">Todos los grados</option>' + grades.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
     gradeSelect.value = grades.includes(currentGrade) ? currentGrade : 'todos';
     reportRowsFiltered = levelRows.filter(r => (gradeSelect.value === 'todos' || r.grado === gradeSelect.value) && (!search || `${r.nombres} ${r.apellidos} ${r.dni || ''} ${r.codigo}`.toLocaleLowerCase('es-PE').includes(search)));
+    if ($('#report-period').value !== 'day') {
+      const totals = reportRowsFiltered.reduce((t,r) => ({ present: t.present + r.presentes, late: t.late + r.tardanzas, absent: t.absent + r.faltas, excused: t.excused + r.justificadas }), {present:0,late:0,absent:0,excused:0});
+      $('#report-unregistered').previousElementSibling.textContent = 'Justificadas';
+      $('#export-report').classList.add('hidden'); $('#close-day').classList.add('hidden');
+      $('#report-enrolled').textContent = reportRowsFiltered.length;
+      $('#report-present').textContent = totals.present + totals.late;
+      $('#report-faltas').textContent = totals.absent;
+      $('#report-unregistered').textContent = totals.excused;
+      $('#report-rows').innerHTML = reportRowsFiltered.map(r => {
+        const details = (r.detalle || []).map(d => {
+          const time = d.hora ? ' (' + new Date(d.hora).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' }) + ')' : '';
+          return `${d.fecha}: ${d.estado}${time}`;
+        }).join('<br>');
+        return `<tr><td>${esc(`${r.nombres} ${r.apellidos}`)}<small>DNI ${esc(r.dni || '—')} · Código ${esc(r.codigo)}<br>${details || 'Sin registros en el período'}</small></td><td>${esc(r.grado || '—')}</td><td>${r.presentes}</td><td>${r.tardanzas}</td><td>${r.faltas}</td><td>${r.justificadas}</td></tr>`;
+      }).join('');
+      $('#report-rows').closest('table').querySelector('thead').innerHTML = '<tr><th>ESTUDIANTE Y DETALLE DIARIO</th><th>GRADO</th><th>PRESENTE</th><th>TARDANZA</th><th>FALTA</th><th>JUSTIFICADA</th></tr>';
+      $('#report-empty').classList.toggle('hidden', reportRowsFiltered.length > 0);
+      return;
+    }
+    $('#report-unregistered').previousElementSibling.textContent = 'Sin registro';
+    $('#export-report').classList.remove('hidden'); $('#close-day').classList.remove('hidden');
+    $('#report-rows').closest('table').querySelector('thead').innerHTML = '<tr><th>ESTUDIANTE</th><th>GRADO</th><th>ESTADO</th><th>HORA</th><th>AVISO WHATSAPP</th></tr>';
     const present = reportRowsFiltered.filter(r => ['presente', 'tardanza'].includes(r.estado)).length;
     const absences = reportRowsFiltered.filter(r => r.estado === 'falta').length;
     const unregistered = reportRowsFiltered.filter(r => !r.estado).length;
@@ -500,11 +539,13 @@
   async function loadReport() {
     if (!$('#report-date').value) $('#report-date').value = dateToday();
     try {
-      reportData = await request('report', { query: `&date=${encodeURIComponent($('#report-date').value)}` });
+      const period = $('#report-period').value;
+      reportData = await request(period === 'day' ? 'report' : 'report_period', { query: `&date=${encodeURIComponent($('#report-date').value)}&period=${encodeURIComponent(period)}` });
       renderReportRows();
     } catch (e) { toast(e.message, true); }
   }
   $('#load-report').addEventListener('click', loadReport);
+  $('#report-period').addEventListener('change', loadReport);
   $('#report-level').addEventListener('change', () => { $('#report-grade').value = 'todos'; renderReportRows(); });
   $('#report-grade').addEventListener('change', renderReportRows);
   $('#report-search').addEventListener('input', renderReportRows);
@@ -519,6 +560,25 @@
     const cells = [['DNI', 'Código Estudiante', 'Estudiante', 'Grado', 'Estado', 'Hora'], ...reportRowsFiltered.map(r => [r.dni || '', r.codigo, `${r.nombres} ${r.apellidos}`, r.grado || '', r.estado || 'Sin registro', r.estado === 'falta' ? '' : (r.hora_ingreso || '')])];
     const csv = '\ufeff' + cells.map(row => row.map(v => `"${String(v).replaceAll('"', '""')}"`).join(',')).join('\r\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); a.download = `asistencia-${reportData.summary.fecha}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  });
+  $('#export-excel').addEventListener('click', () => {
+    if (!reportData) { toast('Primero consulta un reporte.', true); return; }
+    const period = $('#report-period').value;
+    const rows = reportRowsFiltered.map(r => period === 'day'
+      ? [r.dni || '', r.codigo, `${r.nombres} ${r.apellidos}`, r.grado || '', r.estado || 'Sin registro', r.hora_ingreso || '']
+      : [r.dni || '', r.codigo, `${r.nombres} ${r.apellidos}`, r.grado || '', r.presentes, r.tardanzas, r.faltas, r.justificadas, ...(r.detalle || []).map(d => `${d.fecha}: ${d.estado}`)]);
+    const headers = period === 'day' ? ['DNI','Código','Estudiante','Grado','Estado','Hora'] : ['DNI','Código','Estudiante','Grado','Presentes','Tardanzas','Faltas','Justificadas','Detalle diario'];
+    const sheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Asistencia');
+    XLSX.writeFile(book, `Grau-Alert-${period}-${$('#report-date').value}.xlsx`);
+  });
+  $('#export-pdf').addEventListener('click', () => {
+    if (!reportData) { toast('Primero consulta un reporte.', true); return; }
+    const table = $('#report-rows').closest('table').outerHTML;
+    const title = `Asistencia ${$('#report-period').selectedOptions[0].text} · ${$('#report-date').value}`;
+    const win = window.open('', '_blank');
+    if (!win) { toast('Permite las ventanas emergentes para generar el PDF.', true); return; }
+    win.document.write(`<html lang="es"><head><meta charset="utf-8"><title>${esc(title)}</title><style>body{font:12px Arial;padding:24px;color:#17213b}h1{font-size:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccd2df;padding:7px;text-align:left}th{background:#edf1f8}small{display:block;color:#59647b;margin-top:3px}@page{size:landscape;margin:12mm}</style></head><body><h1>${esc(title)}</h1>${table}<script>window.onload=()=>window.print()<\/script></body></html>`); win.document.close();
   });
   async function loadAlerts() {
     try {

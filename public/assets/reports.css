@@ -33,6 +33,15 @@
   font: 500 12px "DM Sans", sans-serif;
 }
 
+#page-reports .report-toolbar select {
+  height: 39px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+}
+
 #page-reports .report-filters input:focus,
 #page-reports .report-filters select:focus {
   border-color: #6679b1;
