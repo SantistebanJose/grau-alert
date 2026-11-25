@@ -7,3 +7,9 @@ services:
     envVars:
       - key: CHEQUEA_API_TOKEN
         sync: false
+      - key: PUSH_VAPID_PUBLIC_KEY
+        sync: false
+      - key: PUSH_VAPID_PRIVATE_KEY
+        sync: false
+      - key: PUSH_VAPID_SUBJECT
+        sync: false

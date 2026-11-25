@@ -3,6 +3,7 @@ declare(strict_types=1);
 require __DIR__ . '/../config/database.php';
 require __DIR__ . '/../models/StudentModel.php';
 require __DIR__ . '/../models/GuardianAlertModel.php';
+require __DIR__ . '/../models/PushNotification.php';
 start_app_session();
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
@@ -88,6 +89,32 @@ try {
     }
 
     $pdo = db();
+    if ($action === 'push_config' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        require_user(['apoderado']);
+        $enabled = PushNotification::configured();
+        respond(['enabled' => $enabled, 'public_key' => $enabled ? PushNotification::publicKey() : null, 'message' => $enabled ? '' : PushNotification::configurationMessage()]);
+    }
+    if ($action === 'push_subscription_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $guardian = require_user(['apoderado']);
+        if (!PushNotification::configured()) respond(['error' => 'Las notificaciones aún no están configuradas en el servidor.'], 503);
+        $subscription = $data['subscription'] ?? null;
+        $endpoint = is_array($subscription) ? trim((string)($subscription['endpoint'] ?? '')) : '';
+        $keys = is_array($subscription) ? ($subscription['keys'] ?? []) : [];
+        $p256dh = is_array($keys) ? trim((string)($keys['p256dh'] ?? '')) : '';
+        $authKey = is_array($keys) ? trim((string)($keys['auth'] ?? '')) : '';
+        if (strlen($endpoint) > 2048 || !filter_var($endpoint, FILTER_VALIDATE_URL) || strtolower((string)parse_url($endpoint, PHP_URL_SCHEME)) !== 'https' || $p256dh === '' || $authKey === '') respond(['error' => 'La suscripción del dispositivo no es válida.'], 422);
+        $save = $pdo->prepare('insert into public.push_subscriptions (apoderado_id,endpoint,p256dh,auth) values (:guardian,:endpoint,:p256dh,:auth) on conflict (endpoint) do update set apoderado_id=excluded.apoderado_id,p256dh=excluded.p256dh,auth=excluded.auth');
+        $save->execute(['guardian' => $guardian['id'], 'endpoint' => $endpoint, 'p256dh' => $p256dh, 'auth' => $authKey]);
+        respond(['ok' => true]);
+    }
+    if ($action === 'push_subscription_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $guardian = require_user(['apoderado']);
+        $endpoint = trim((string)($data['endpoint'] ?? ''));
+        if ($endpoint === '' || strlen($endpoint) > 2048) respond(['error' => 'Dispositivo no válido.'], 422);
+        $delete = $pdo->prepare('delete from public.push_subscriptions where apoderado_id=:guardian and endpoint=:endpoint');
+        $delete->execute(['guardian' => $guardian['id'], 'endpoint' => $endpoint]);
+        respond(['ok' => true]);
+    }
     if ($action === 'family_home' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $user = require_user(['apoderado']);
         $stmt = $pdo->prepare("select e.id,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,e.foto_url,g.nombre as grado,ea.parentesco from public.estudiante_apoderados ea join public.estudiantes e on e.id=ea.estudiante_id left join public.grados g on g.id=e.grado_id where ea.apoderado_id=:uid and e.activo=true order by e.apellidos,e.nombres");
@@ -126,7 +153,7 @@ try {
         $email = filter_var(trim((string)($data['correo'] ?? '')), FILTER_VALIDATE_EMAIL);
         $names = trim((string)($data['nombres'] ?? '')); $last = trim((string)($data['apellidos'] ?? ''));
         $studentId = trim((string)($data['estudiante_id'] ?? ''));
-        if (!$email || $names === '' || $last === '' || $studentId === '') respond(['error' => 'Completa los datos del apoderado y elige un estudiante.'], 422);
+        if (!$email || $studentId === '') respond(['error' => 'Ingresa el correo del apoderado y elige un estudiante.'], 422);
         try {
             $pdo->beginTransaction();
             $existingStmt = $pdo->prepare('select id,correo,nombres,apellidos,telefono,rol,activo from public.usuarios where lower(correo)=lower(:email) limit 1 for update');
@@ -140,6 +167,7 @@ try {
                 if (!$isActive) { $pdo->rollBack(); respond(['error' => 'La cuenta de apoderado de ese correo está desactivada.'], 409); }
                 $guardian = $existing;
             } else {
+                if ($names === '' || $last === '') { $pdo->rollBack(); respond(['error' => 'Para crear una cuenta nueva, completa los nombres y apellidos. Si ya tiene cuenta, usa su correo registrado.'], 422); }
                 $temporaryPassword = '12345678';
                 $stmt = $pdo->prepare("insert into public.usuarios (correo,password_hash,nombres,apellidos,telefono,rol) values (:email,:hash,:nombres,:apellidos,:telefono,'apoderado') returning id,correo,nombres,apellidos,telefono,rol");
                 $stmt->execute(['email' => $email, 'hash' => password_hash($temporaryPassword, PASSWORD_DEFAULT), 'nombres' => $names, 'apellidos' => $last, 'telefono' => trim((string)($data['telefono'] ?? '')) ?: null]);
@@ -208,7 +236,7 @@ try {
     }
     if ($action === 'guardians' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         require_user(['administrador']);
-        $rows = $pdo->query("select u.id,u.correo,u.nombres,u.apellidos,u.telefono,u.activo,e.id as estudiante_id,e.dni,e.codigo,e.nombres as estudiante_nombres,e.apellidos as estudiante_apellidos,g.nombre as grado,ea.parentesco,ea.contacto_principal from public.usuarios u join public.estudiante_apoderados ea on ea.apoderado_id=u.id join public.estudiantes e on e.id=ea.estudiante_id left join public.grados g on g.id=e.grado_id where u.rol='apoderado' and e.activo=true order by u.apellidos,e.apellidos")->fetchAll();
+        $rows = $pdo->query("select u.id,u.correo,u.nombres,u.apellidos,coalesce(nullif(u.telefono,'') ,e.telefono_apoderado) as telefono,u.activo,e.id as estudiante_id,e.dni,e.codigo,e.nombres as estudiante_nombres,e.apellidos as estudiante_apellidos,g.nombre as grado,ea.parentesco,ea.contacto_principal from public.usuarios u join public.estudiante_apoderados ea on ea.apoderado_id=u.id join public.estudiantes e on e.id=ea.estudiante_id left join public.grados g on g.id=e.grado_id where u.rol='apoderado' and e.activo=true order by u.apellidos,e.apellidos")->fetchAll();
         respond(['guardians' => $rows]);
     }
     if ($action === 'guardian_reset_password' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -237,7 +265,7 @@ try {
         require_user(['administrador','tutor']);
         $date = (string)($_GET['date'] ?? date('Y-m-d'));
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) respond(['error' => 'Fecha no válida.'], 422);
-        $stmt = $pdo->prepare("select e.id as estudiante_id,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,g.nombre as grado,g.nivel,a.id as asistencia_id,a.estado,case when a.estado='falta' then null else a.hora_ingreso end as hora_ingreso,a.metodo,guardian.apoderado_id,guardian.telefono as telefono_apoderado,notice.id as alerta_id,notice.estado as alerta_estado from public.estudiantes e left join public.grados g on g.id=e.grado_id left join public.asistencias a on a.estudiante_id=e.id and a.fecha=:day left join lateral (select u.id as apoderado_id,u.telefono from public.estudiante_apoderados ea join public.usuarios u on u.id=ea.apoderado_id where ea.estudiante_id=e.id and u.rol='apoderado' and u.activo=true order by (ea.contacto_principal and length(regexp_replace(coalesce(u.telefono,''),'[^0-9]','','g'))>=9) desc,(length(regexp_replace(coalesce(u.telefono,''),'[^0-9]','','g'))>=9) desc,ea.contacto_principal desc,u.id limit 1) guardian on true left join lateral (select al.id,al.estado from public.alertas al where al.asistencia_id=a.id and al.apoderado_id=guardian.apoderado_id and al.tipo='inasistencia' and al.canal='whatsapp' order by al.creado_en desc limit 1) notice on true where e.activo=true order by case lower(g.nivel) when 'primaria' then 1 when 'secundaria' then 2 else 3 end,g.nombre,e.apellidos,e.nombres");
+        $stmt = $pdo->prepare("select e.id as estudiante_id,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,g.nombre as grado,g.nivel,a.id as asistencia_id,a.estado,case when a.estado='falta' then null else a.hora_ingreso end as hora_ingreso,a.metodo,guardian.apoderado_id,guardian.telefono as telefono_apoderado,notice.id as alerta_id,notice.estado as alerta_estado from public.estudiantes e left join public.grados g on g.id=e.grado_id left join public.asistencias a on a.estudiante_id=e.id and a.fecha=:day left join lateral (select u.id as apoderado_id,coalesce(nullif(u.telefono,'') ,e.telefono_apoderado) as telefono from public.estudiante_apoderados ea join public.usuarios u on u.id=ea.apoderado_id where ea.estudiante_id=e.id and u.rol='apoderado' and u.activo=true order by (ea.contacto_principal and length(regexp_replace(coalesce(u.telefono,''),'[^0-9]','','g'))>=9) desc,(length(regexp_replace(coalesce(u.telefono,''),'[^0-9]','','g'))>=9) desc,ea.contacto_principal desc,u.id limit 1) guardian on true left join lateral (select al.id,al.estado from public.alertas al where al.asistencia_id=a.id and al.apoderado_id=guardian.apoderado_id and al.tipo='inasistencia' and al.canal='whatsapp' order by al.creado_en desc limit 1) notice on true where e.activo=true order by case lower(g.nivel) when 'primaria' then 1 when 'secundaria' then 2 else 3 end,g.nombre,e.apellidos,e.nombres");
         $stmt->execute(['day' => $date]); $rows = $stmt->fetchAll();
         $summary = ['fecha' => $date, 'matriculados' => count($rows), 'presentes' => 0, 'tardanzas' => 0, 'faltas' => 0, 'sin_registro' => 0, 'justificadas' => 0];
         foreach ($rows as $row) {
@@ -274,7 +302,7 @@ try {
     }
     if ($action === 'alerts' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         require_user(['administrador','tutor']);
-        $rows = $pdo->query("select al.id,al.tipo,al.canal,al.estado,al.mensaje,al.creado_en,u.nombres as apoderado_nombres,u.apellidos as apoderado_apellidos,u.telefono as apoderado_telefono,e.nombres as estudiante_nombres,e.apellidos as estudiante_apellidos from public.alertas al join public.estudiantes e on e.id=al.estudiante_id left join public.usuarios u on u.id=al.apoderado_id order by case when al.estado='pendiente' and al.canal='whatsapp' then 0 else 1 end, al.creado_en desc limit 200")->fetchAll();
+        $rows = $pdo->query("select al.id,al.tipo,al.canal,al.estado,al.mensaje,al.creado_en,u.nombres as apoderado_nombres,u.apellidos as apoderado_apellidos,coalesce(nullif(u.telefono,'') ,e.telefono_apoderado) as apoderado_telefono,e.nombres as estudiante_nombres,e.apellidos as estudiante_apellidos from public.alertas al join public.estudiantes e on e.id=al.estudiante_id left join public.usuarios u on u.id=al.apoderado_id order by case when al.estado='pendiente' and al.canal='whatsapp' then 0 else 1 end, al.creado_en desc limit 200")->fetchAll();
         respond(['alerts' => $rows]);
     }
     if ($action === 'alert_mark_sent' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -296,7 +324,7 @@ try {
             if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $uuid)) respond(['error' => 'No se pudo identificar el aviso.'], 422);
         }
         if ($message === '' || mb_strlen($message) > 1000) respond(['error' => 'El mensaje del aviso no es válido.'], 422);
-        $verify = $pdo->prepare("select 1 from public.asistencias a join public.estudiante_apoderados ea on ea.estudiante_id=a.estudiante_id and ea.apoderado_id=:guardian join public.usuarios u on u.id=ea.apoderado_id and u.rol='apoderado' and u.activo=true where a.id=:attendance and a.estudiante_id=:student and a.estado='falta' and length(regexp_replace(coalesce(u.telefono,''),'[^0-9]','','g')) between 9 and 15");
+        $verify = $pdo->prepare("select 1 from public.asistencias a join public.estudiantes e on e.id=a.estudiante_id join public.estudiante_apoderados ea on ea.estudiante_id=a.estudiante_id and ea.apoderado_id=:guardian join public.usuarios u on u.id=ea.apoderado_id and u.rol='apoderado' and u.activo=true where a.id=:attendance and a.estudiante_id=:student and a.estado='falta' and length(regexp_replace(coalesce(nullif(u.telefono,''),e.telefono_apoderado,''),'[^0-9]','','g')) between 9 and 15");
         $verify->execute(['guardian' => $guardianId, 'attendance' => $attendanceId, 'student' => $studentId]);
         if (!$verify->fetchColumn()) respond(['error' => 'No hay una falta y un apoderado válido vinculados para este aviso.'], 404);
         $pdo->beginTransaction();
@@ -331,11 +359,18 @@ try {
         $pdo->beginTransaction();
         $missing = $pdo->prepare("insert into public.asistencias (estudiante_id,fecha,estado,metodo,verificado_por,observacion) select e.id,:day,'falta','manual',:uid,'Cierre diario' from public.estudiantes e where e.activo=true and not exists (select 1 from public.asistencias a where a.estudiante_id=e.id and a.fecha=:day2) on conflict (estudiante_id,fecha) do nothing returning id,estudiante_id");
         $missing->execute(['day' => $day, 'day2' => $day, 'uid' => $user['id']]); $created = $missing->fetchAll();
+        $sendAbsenceAlerts = !$calendarDay || filter_var($calendarDay['alarma_activa'], FILTER_VALIDATE_BOOLEAN);
+        $pushItems = [];
         foreach ($created as $absence) {
-            $details = $pdo->prepare('select nombres,apellidos from public.estudiantes where id=:id'); $details->execute(['id' => $absence['estudiante_id']]); $student = $details->fetch();
-            if (!$calendarDay || $calendarDay['alarma_activa']) create_guardian_alerts($pdo, $absence['estudiante_id'], $absence['id'], 'inasistencia', 'No registró su llegada a la institución el ' . $day . '. Por favor, comuníquese con la institución.');
+            if ($sendAbsenceAlerts) {
+                $message = 'No registró su llegada a la institución el ' . $day . '. Por favor, comuníquese con la institución.';
+                create_guardian_alerts($pdo, $absence['estudiante_id'], $absence['id'], 'inasistencia', $message);
+                $pushItems[] = ['student_id' => $absence['estudiante_id'], 'attendance_id' => $absence['id'], 'kind' => 'inasistencia', 'message' => $message];
+            }
         }
-        $pdo->commit(); respond(['ok' => true, 'faltas_marcadas' => count($created)]);
+        $pdo->commit();
+        PushNotification::sendBatch($pdo, $pushItems);
+        respond(['ok' => true, 'faltas_marcadas' => count($created)]);
     }
     if ($action === 'students' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $q = trim((string)($_GET['q'] ?? ''));
@@ -502,8 +537,12 @@ try {
         $studentStmt = $pdo->prepare('select nombres,apellidos from public.estudiantes where id=:id and activo=true'); $studentStmt->execute(['id' => $studentId]); $student = $studentStmt->fetch();
         if (!$student) { $pdo->rollBack(); respond(['error' => 'Estudiante no encontrado o inactivo.'], 404); }
         $time = (new DateTimeImmutable('now', new DateTimeZone('America/Lima')))->format('H:i');
-        create_guardian_alerts($pdo, $studentId, $attendance['id'], $status === 'tardanza' ? 'tardanza' : 'ingreso', $status === 'tardanza' ? 'Llegó tarde a la institución a las ' . $time . '.' : 'Ingresó a la institución a las ' . $time . '.');
-        $pdo->commit(); respond(['ok' => true, 'attendance' => $attendance]);
+        $kind = $status === 'tardanza' ? 'tardanza' : 'ingreso';
+        $attendanceMessage = $status === 'tardanza' ? 'Llegó tarde a la institución a las ' . $time . '.' : 'Ingresó a la institución a las ' . $time . '.';
+        create_guardian_alerts($pdo, $studentId, $attendance['id'], $kind, $attendanceMessage);
+        $pdo->commit();
+        PushNotification::sendForAttendance($pdo, $studentId, $attendance['id'], $kind, $attendanceMessage);
+        respond(['ok' => true, 'attendance' => $attendance]);
     }
     if ($action === 'student_by_qr' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $token = trim((string)($_GET['token'] ?? ''));
@@ -550,6 +589,7 @@ try {
         $arrivalMessage = $status === 'tardanza' ? 'Llegó tarde a la institución a las ' . $now->format('H:i') . '.' : 'Ingresó a la institución a las ' . $now->format('H:i') . '.';
         create_guardian_alerts($pdo, $student['id'], $attendance['id'], $status === 'tardanza' ? 'tardanza' : 'ingreso', $arrivalMessage);
         $pdo->commit();
+        PushNotification::sendForAttendance($pdo, $student['id'], $attendance['id'], $status === 'tardanza' ? 'tardanza' : 'ingreso', $arrivalMessage);
         respond(['ok' => true, 'attendance' => $attendance]);
     }
     respond(['error' => 'Acción no encontrada.'], 404);

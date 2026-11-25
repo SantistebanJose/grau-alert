@@ -1,7 +1,7 @@
 (() => {
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
-  const state = { csrf: '', user: null, students: [], scanner: null, currentToken: '', scanTimer: null, dbReady: false };
+  const state = { csrf: '', user: null, students: [], communityGuardians: [], scanner: null, currentToken: '', scanTimer: null, dbReady: false };
   const toast = (message, error = false) => {
     const el = $('#toast'); el.textContent = message; el.classList.toggle('error', error); el.classList.add('show');
     clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.remove('show'), 3400);
@@ -300,6 +300,13 @@
     try {
       const [staff, guardians, students] = await Promise.all([request('staff'), request('guardians'), request('students')]);
       state.communityStudents = students.students;
+      const uniqueGuardians = new Map();
+      guardians.guardians.forEach(g => {
+        if (!uniqueGuardians.has(g.id)) uniqueGuardians.set(g.id, { ...g, estudiantes: [] });
+        const item = uniqueGuardians.get(g.id);
+        item.estudiantes.push(`${g.estudiante_nombres} ${g.estudiante_apellidos}`.trim());
+      });
+      state.communityGuardians = [...uniqueGuardians.values()];
       $('#staff-rows').innerHTML = staff.staff.map(u => `<tr><td>${esc(`${u.nombres} ${u.apellidos}`)}</td><td>${esc(u.correo)}</td><td>${esc(u.rol)}</td><td>${esc(u.telefono || '—')}</td></tr>`).join('');
       $('#guardian-rows').innerHTML = guardians.guardians.map(g => `<tr><td>${esc(`${g.nombres} ${g.apellidos}`)}</td><td>${esc(g.correo)}</td><td>${esc(`${g.estudiante_nombres} ${g.estudiante_apellidos}`)}</td><td>${esc(g.grado || '—')}</td><td>${esc(g.telefono || '—')}${g.contacto_principal ? ' · Principal' : ''}</td><td><button type="button" class="btn btn-ghost guardian-reset-password" data-guardian-id="${esc(g.id)}">Nueva clave</button></td></tr>`).join('');
       $$('.guardian-reset-password').forEach(button => button.addEventListener('click', async () => {
@@ -315,6 +322,8 @@
         finally { button.disabled = false; }
       }));
       $('#guardian-student-search').value = ''; $('#guardian-student-select').value = ''; $('#guardian-student-picked').classList.add('hidden');
+      $('#guardian-existing-search').value = ''; $('#guardian-existing-select').value = ''; $('#guardian-existing-picked').classList.add('hidden');
+      $('#guardian-form').elements.correo.readOnly = false;
     } catch (e) { toast(e.message, true); }
   }
   function renderGuardianStudentResults(value) {
@@ -360,9 +369,50 @@
     $('#guardian-student-search').dataset.studentSelected = ''; $('#guardian-student-picked').classList.add('hidden');
     $('#guardian-student-search').focus();
   });
+  function renderExistingGuardianResults(value) {
+    const root = $('#guardian-existing-results'), query = normHeader(value.trim());
+    root.classList.remove('hidden'); $('#guardian-existing-search').setAttribute('aria-expanded', 'true');
+    if (query.length < 2) { root.innerHTML = '<div class="student-picker-hint">Escribe al menos 2 letras para buscar.</div>'; return; }
+    const matches = (state.communityGuardians || []).filter(g => normHeader(`${g.nombres} ${g.apellidos} ${g.correo} ${g.estudiantes.join(' ')}`).includes(query)).slice(0, 10);
+    root.innerHTML = matches.length ? matches.map(g => `<button type="button" class="student-picker-option" role="option" data-guardian-id="${esc(g.id)}"><b>${esc(`${g.nombres} ${g.apellidos}`)}</b><small>${esc(g.correo)} · ${esc(g.telefono || 'Sin teléfono')} · ${g.estudiantes.length} estudiante(s)</small></button>`).join('') : '<div class="student-picker-hint">No se encontraron apoderados registrados.</div>';
+  }
+  function pickExistingGuardian(guardian) {
+    if (!guardian) return;
+    const search = $('#guardian-existing-search');
+    $('#guardian-existing-select').value = guardian.id;
+    search.value = `${guardian.nombres} ${guardian.apellidos} · ${guardian.correo}`;
+    $('#guardian-form').elements.correo.value = guardian.correo;
+    $('#guardian-form').elements.correo.readOnly = true;
+    $('#guardian-form').elements.nombres.value = guardian.nombres;
+    $('#guardian-form').elements.apellidos.value = guardian.apellidos;
+    $('#guardian-form').elements.telefono.value = guardian.telefono || '';
+    const picked = $('#guardian-existing-picked');
+    picked.innerHTML = `<span>Cuenta seleccionada</span><b>${esc(`${guardian.nombres} ${guardian.apellidos}`)}${guardian.telefono ? ` · ${esc(guardian.telefono)}` : ''}</b><button type="button" class="student-picker-clear" aria-label="Cambiar apoderado">Cambiar</button>`;
+    picked.classList.remove('hidden'); $('#guardian-existing-results').classList.add('hidden'); search.setAttribute('aria-expanded', 'false');
+  }
+  $('#guardian-existing-search').addEventListener('focus', e => renderExistingGuardianResults(e.currentTarget.value));
+  $('#guardian-existing-search').addEventListener('input', e => { $('#guardian-existing-select').value = ''; renderExistingGuardianResults(e.currentTarget.value); });
+  $('#guardian-existing-search').addEventListener('keydown', e => {
+    if (e.key === 'Escape') { $('#guardian-existing-results').classList.add('hidden'); e.currentTarget.setAttribute('aria-expanded', 'false'); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); $('#guardian-existing-results [data-guardian-id]')?.focus(); }
+  });
+  $('#guardian-existing-results').addEventListener('click', e => {
+    const option = e.target.closest('[data-guardian-id]');
+    if (option) pickExistingGuardian((state.communityGuardians || []).find(g => g.id === option.dataset.guardianId));
+  });
+  $('#guardian-existing-picked').addEventListener('click', e => {
+    if (!e.target.closest('.student-picker-clear')) return;
+    $('#guardian-existing-select').value = ''; $('#guardian-existing-search').value = ''; $('#guardian-existing-picked').classList.add('hidden');
+    $('#guardian-form').elements.correo.value = ''; $('#guardian-form').elements.correo.readOnly = false;
+    $('#guardian-form').elements.nombres.value = ''; $('#guardian-form').elements.apellidos.value = ''; $('#guardian-form').elements.telefono.value = '';
+    $('#guardian-existing-search').focus();
+  });
   document.addEventListener('click', e => {
     if (!e.target.closest('#guardian-student-picker')) {
       $('#guardian-student-results').classList.add('hidden'); $('#guardian-student-search').setAttribute('aria-expanded', 'false');
+    }
+    if (!e.target.closest('#guardian-existing-picker')) {
+      $('#guardian-existing-results').classList.add('hidden'); $('#guardian-existing-search').setAttribute('aria-expanded', 'false');
     }
   });
   $('#staff-form').addEventListener('submit', async e => {
@@ -370,6 +420,12 @@
     try { await request('staff_create', { method: 'POST', data }); e.currentTarget.reset(); toast('Cuenta de personal creada.'); loadCommunity(); }
     catch (err) { toast(err.message, true); }
   });
+  const guardianForm = $('#guardian-form');
+  guardianForm.elements.nombres.required = false;
+  guardianForm.elements.apellidos.required = false;
+  guardianForm.elements.nombres.closest('label').childNodes[0].textContent = 'Nombres (solo cuenta nueva)';
+  guardianForm.elements.apellidos.closest('label').childNodes[0].textContent = 'Apellidos (solo cuenta nueva)';
+  guardianForm.querySelectorAll('.form-note')[1].textContent = 'Al seleccionar una cuenta existente, se mantiene su contraseña. Si es un apoderado nuevo, completa nombres y apellidos; la clave temporal será 12345678.';
   $('#guardian-form').addEventListener('submit', async e => {
     e.preventDefault();
     if (!e.currentTarget.elements.estudiante_id.value) { toast('Busca y selecciona al estudiante antes de continuar.', true); $('#guardian-student-search').focus(); return; }
@@ -541,7 +597,7 @@
       const noticeCell = markedSent ? '<span class="report-sent">Aviso enviado</span>' : `${sendNotice}${markNotice}`;
       const time = r.estado === 'falta' || !r.hora_ingreso ? '—' : new Date(r.hora_ingreso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' });
       const badgeClass = r.estado === 'falta' ? 'absent-badge' : r.estado === 'tardanza' ? 'late-badge' : '';
-      return `<tr><td>${esc(full)}<small>DNI ${esc(r.dni || '—')} · Código ${esc(r.codigo)}</small></td><td>${esc(r.grado || '—')}</td><td><span class="badge ${badgeClass}">${r.estado ? names[r.estado] || esc(r.estado) : 'Sin registro'}</span></td><td>${time}</td><td><div class="report-notice-actions">${noticeCell}</div></td></tr>`;
+      return `<tr><td>${esc(full)}<small>DNI ${esc(r.dni || '—')} · Código ${esc(r.codigo)}${r.telefono_apoderado ? `<br>Contacto apoderado: ${esc(r.telefono_apoderado)}` : '<br>Sin teléfono del apoderado'}</small></td><td>${esc(r.grado || '—')}</td><td><span class="badge ${badgeClass}">${r.estado ? names[r.estado] || esc(r.estado) : 'Sin registro'}</span></td><td>${time}</td><td><div class="report-notice-actions">${noticeCell}</div></td></tr>`;
     }).join('');
     $$('[data-report-student]').forEach(button => button.addEventListener('click', async () => {
       if (!confirm('¿Ya enviaste este mensaje desde WhatsApp?')) return;
@@ -621,7 +677,43 @@
       $('#alerts-empty').classList.toggle('hidden', result.alerts.length > 0);
     } catch (e) { toast(e.message, true); }
   }
+  function pushApplicationKey(value) {
+    const padding = '='.repeat((4 - value.length % 4) % 4);
+    const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64), bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    return bytes;
+  }
+  async function initFamilyPush() {
+    const button = $('#push-enable'), status = $('#push-status');
+    if (!button || button.dataset.ready === '1') return;
+    button.dataset.ready = '1'; button.disabled = true;
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) throw new Error('Este navegador no admite notificaciones push.');
+      const config = await request('push_config');
+      if (!config.enabled || !config.public_key) { status.textContent = config.message || 'Falta configurar el envío push en el servidor.'; button.textContent = 'Notificaciones no configuradas'; return; }
+      const registration = await navigator.serviceWorker.register('service-worker.js');
+      let subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        await request('push_subscription_save', { method: 'POST', data: { subscription: subscription.toJSON() } });
+        button.textContent = 'Notificaciones activas'; status.textContent = 'Este dispositivo recibirá avisos de tus estudiantes.'; return;
+      }
+      if (Notification.permission === 'denied') { status.textContent = 'Las notificaciones están bloqueadas en los permisos del navegador.'; return; }
+      button.disabled = false; status.textContent = 'Actívalas para recibir avisos de asistencia en este dispositivo.';
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          const permission = await Notification.requestPermission();
+          if (permission !== 'granted') throw new Error('No se otorgó permiso para mostrar notificaciones.');
+          subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushApplicationKey(config.public_key) });
+          await request('push_subscription_save', { method: 'POST', data: { subscription: subscription.toJSON() } });
+          button.textContent = 'Notificaciones activas'; status.textContent = 'Este dispositivo recibirá avisos de tus estudiantes.'; toast('Notificaciones activadas en este dispositivo.');
+        } catch (error) { button.disabled = false; status.textContent = error.message; toast(error.message, true); }
+      });
+    } catch (error) { status.textContent = error.message || 'No se pudo preparar las notificaciones.'; }
+  }
   async function loadFamily() {
+    initFamilyPush();
     try {
       const result = await request('family_home'); const root = $('#family-students');
       if (!result.students.length) { root.innerHTML = '<div class="content-card family-empty">Tu cuenta aún no tiene estudiantes vinculados. Comunícate con la institución.</div>'; return; }
@@ -696,7 +788,7 @@
     const sendNotice = locked && ['presente', 'tardanza'].includes(already?.estado) && phone.length >= 11 && phone.length <= 15
       ? `<a class="btn btn-secondary scanner-whatsapp" href="https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(`Buen día. Le informamos que ${fullName(student)} ${already.estado === 'tardanza' ? 'llegó tarde' : 'ingresó'} a la institución hoy a las ${new Date(already.hora_ingreso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' })}. - Grau-Alert.`)}" target="_blank" rel="noopener">Enviar aviso por WhatsApp</a>`
       : locked && ['presente', 'tardanza'].includes(already?.estado) ? '<p class="form-note">Registra un teléfono válido del apoderado para enviar el aviso.</p>' : '';
-    $('#verify-card').innerHTML = `<div class="verify-student">${student.foto_url ? `<img class="verify-photo" src="${esc(student.foto_url)}" alt="Foto de ${esc(fullName(student))}">` : `<div class="verify-photo" style="display:grid;place-items:center;margin:0 auto 11px;font-size:26px;font-weight:800;color:#102454">${esc(initials(fullName(student)))}</div>`}<h2>${esc(fullName(student))}</h2><p class="muted">${esc(student.grado || 'Sin grado')}</p><span class="verify-code">Código ${esc(student.codigo)}</span><div class="verify-check">${description}</div><button id="confirm-attendance" class="btn btn-primary" ${locked ? 'disabled' : ''}>${confirmLabel}</button>${sendNotice}</div>`;
+    $('#verify-card').innerHTML = `<div class="verify-student">${student.foto_url ? `<img class="verify-photo" src="${esc(student.foto_url)}" alt="Foto de ${esc(fullName(student))}">` : `<div class="verify-photo" style="display:grid;place-items:center;margin:0 auto 11px;font-size:26px;font-weight:800;color:#102454">${esc(initials(fullName(student)))}</div>`}<h2>${esc(fullName(student))}</h2><p class="muted">${esc(student.grado || 'Sin grado')}</p><span class="verify-code">Código ${esc(student.codigo)}</span><p class="muted">Contacto del apoderado: ${esc(student.telefono_apoderado || 'No registrado')}</p><div class="verify-check">${description}</div><button id="confirm-attendance" class="btn btn-primary" ${locked ? 'disabled' : ''}>${confirmLabel}</button>${sendNotice}</div>`;
     if (!locked) $('#confirm-attendance').addEventListener('click', confirmAttendance);
   }
   function showVerifyError(message) { $('#verify-card').innerHTML = `<div class="verify-placeholder"><div class="scan-symbol">!</div><b>No se pudo validar</b><p class="muted">${esc(message)}</p></div>`; }

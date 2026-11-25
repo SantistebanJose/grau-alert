@@ -4,7 +4,7 @@ Sistema web de asistencia escolar con PHP, PostgreSQL y lectura de carné QR. El
 
 ## Requisitos
 
-- PHP 8.1 o superior.
+- PHP 8.2 o superior.
 - Extensiones PHP `pdo` y `pdo_pgsql` habilitadas.
 - PostgreSQL. Para Supabase, usar una conexión de base de datos privada desde el servidor PHP.
 - HTTPS para usar la cámara en un sitio publicado. En desarrollo, `localhost` también permite usarla.
@@ -23,6 +23,8 @@ Sistema web de asistencia escolar con PHP, PostgreSQL y lectura de carné QR. El
    - `APP_SETUP_KEY`: una clave larga y aleatoria para habilitar la creación del primer administrador.
 
 Si la base ya tenía el esquema inicial, ejecuta la migración [`2026_11_10_delta_desde_esquema_inicial.sql`](database/migrations/2026_11_10_delta_desde_esquema_inicial.sql) antes de abrir el directorio escolar. Añade DNI, correo y estado de sesión de PerúEduca, sin modificar el código oficial ya existente.
+
+Para habilitar las notificaciones push, ejecuta también [`2026_11_25_push_subscriptions.sql`](database/migrations/2026_11_25_push_subscriptions.sql) en el SQL Editor de Supabase. En Render configura `PUSH_VAPID_PUBLIC_KEY`, `PUSH_VAPID_PRIVATE_KEY` y `PUSH_VAPID_SUBJECT` como variables privadas. Genera un par de claves con `composer install` y `php scripts/generate-vapid-keys.php`; guarda ambas claves en Render y conserva el mismo par. El asunto debe ser un correo de contacto con formato `mailto:correo@institucion.edu.pe`. Después de desplegar, cada apoderado debe iniciar sesión en su dispositivo y pulsar **Activar notificaciones** en el Portal familiar.
 
 La conexión usa `PDO` con `pgsql`, SSL obligatorio y la zona horaria `America/Lima`. No pongas las credenciales dentro de `config.php`, no las subas al repositorio y nunca uses la clave `service_role` en el navegador. La contraseña de la base solo debe estar disponible para PHP en el servidor.
 
@@ -64,6 +66,6 @@ En “Comunidad escolar” se puede importar un Excel o CSV con una fila por rel
 - PostgreSQL impide más de una asistencia diaria por estudiante.
 - La pantalla de inicio presenta el total de registros del día.
 
-Los avisos de ingreso, tardanza e inasistencia quedan disponibles en el portal familiar. Los avisos con teléfono asociado aparecen en “Avisos” como pendientes e incluyen “Enviar aviso”: abre WhatsApp Web o la aplicación con el número y el texto listos; el personal debe pulsar Enviar en WhatsApp y luego puede marcar el aviso enviado en Grau-Alert. El sistema no envía mensajes por sí solo. La asistencia QR considera tardanza después de las 07:30, configurable con la variable de entorno `SCHOOL_LATE_AFTER` en formato `HH:MM`. Las inasistencias y avisos se generan al usar “Cerrar día, marcar faltas y preparar avisos” en Reportes, para la fecha lectiva seleccionada.
+Los avisos de ingreso, tardanza e inasistencia quedan disponibles en el portal familiar. Con VAPID configurado y el permiso activado por el apoderado, el servidor envía también notificaciones push al dispositivo instalado. La alerta audible usa el sonido configurado por el sistema operativo y puede depender del modo silencio y los permisos del dispositivo. Los avisos con teléfono asociado aparecen en “Avisos” como pendientes e incluyen “Enviar aviso”: abre WhatsApp Web o la aplicación con el número y el texto listos; el personal debe pulsar Enviar en WhatsApp y luego puede marcar el aviso enviado en Grau-Alert. La asistencia QR considera tardanza según las reglas escolares configuradas. Las inasistencias y avisos se generan al usar “Cerrar día, marcar faltas y preparar avisos” en Reportes, para la fecha lectiva seleccionada.
 
 La interfaz carga las librerías del lector QR, generador QR y fuentes desde CDN; para uso sin conexión habrá que alojarlas localmente.
