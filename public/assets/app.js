@@ -180,12 +180,12 @@
   }
   $('#new-student-btn').addEventListener('click', () => openStudentEditor());
   $('#student-form').addEventListener('submit', async e => {
-    e.preventDefault(); const data = Object.fromEntries(new FormData(e.currentTarget).entries());
+    e.preventDefault(); const form = e.currentTarget; const data = Object.fromEntries(new FormData(form).entries());
     try {
       const result = editingStudentId
         ? await request('student_update', { method: 'POST', data: { ...data, id: editingStudentId } })
         : await request('student_create', { method: 'POST', data });
-      const wasEditing = Boolean(editingStudentId); editingStudentId = null; e.currentTarget.reset(); $('#student-dialog').close();
+      const wasEditing = Boolean(editingStudentId); editingStudentId = null; form.reset(); $('#student-dialog').close();
       toast(wasEditing ? 'Cambios guardados.' : 'Estudiante registrado.');
       if (!wasEditing) showCard(result.student);
       await loadStudents($('#student-search').value); loadDashboard();
@@ -416,8 +416,8 @@
     }
   });
   $('#staff-form').addEventListener('submit', async e => {
-    e.preventDefault(); const data = Object.fromEntries(new FormData(e.currentTarget).entries());
-    try { await request('staff_create', { method: 'POST', data }); e.currentTarget.reset(); toast('Cuenta de personal creada.'); loadCommunity(); }
+    e.preventDefault(); const form = e.currentTarget; const data = Object.fromEntries(new FormData(form).entries());
+    try { await request('staff_create', { method: 'POST', data }); form.reset(); toast('Cuenta de personal creada.'); loadCommunity(); }
     catch (err) { toast(err.message, true); }
   });
   const guardianForm = $('#guardian-form');
@@ -428,11 +428,12 @@
   guardianForm.querySelectorAll('.form-note')[1].textContent = 'Al seleccionar una cuenta existente, se mantiene su contraseña. Si es un apoderado nuevo, completa nombres y apellidos; la clave temporal será 12345678.';
   $('#guardian-form').addEventListener('submit', async e => {
     e.preventDefault();
-    if (!e.currentTarget.elements.estudiante_id.value) { toast('Busca y selecciona al estudiante antes de continuar.', true); $('#guardian-student-search').focus(); return; }
-    const data = Object.fromEntries(new FormData(e.currentTarget).entries()); data.contacto_principal = e.currentTarget.elements.contacto_principal.checked;
+    const form = e.currentTarget;
+    if (!form.elements.estudiante_id.value) { toast('Busca y selecciona al estudiante antes de continuar.', true); $('#guardian-student-search').focus(); return; }
+    const data = Object.fromEntries(new FormData(form).entries()); data.contacto_principal = form.elements.contacto_principal.checked;
     try {
       const result = await request('guardian_create', { method: 'POST', data });
-      e.currentTarget.reset(); $('#guardian-student-picked').classList.add('hidden');
+      form.reset(); $('#guardian-student-picked').classList.add('hidden');
       $('#guardian-credential-result').classList.add('hidden');
       if (result.created_account) {
         $('#guardian-temporary-password').textContent = result.temporary_password;
@@ -528,8 +529,8 @@
     } catch (e) { toast(e.message, true); }
   }
   $('#calendar-form').addEventListener('submit', async e => {
-    e.preventDefault(); const data = Object.fromEntries(new FormData(e.currentTarget).entries()); data.alarma_activa = e.currentTarget.elements.alarma_activa.checked;
-    try { await request('calendar_save', { method: 'POST', data }); e.currentTarget.reset(); e.currentTarget.elements.alarma_activa.checked = true; toast('Fecha escolar guardada.'); loadCalendar(); }
+    e.preventDefault(); const form = e.currentTarget; const data = Object.fromEntries(new FormData(form).entries()); data.alarma_activa = form.elements.alarma_activa.checked;
+    try { await request('calendar_save', { method: 'POST', data }); form.reset(); form.elements.alarma_activa.checked = true; toast('Fecha escolar guardada.'); loadCalendar(); }
     catch (err) { toast(err.message, true); }
   });
 
