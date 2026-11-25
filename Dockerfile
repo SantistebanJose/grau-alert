@@ -1,7 +1,18 @@
-FROM php:8.1-apache
+FROM php:8.3-cli-bookworm
 
-RUN apt-get update && apt-get install -y libpq-dev && docker-php-ext-install pdo_pgsql
+WORKDIR /var/www/html
 
-COPY . /var/www/html/
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq-dev libzip-dev libonig-dev libcurl4-openssl-dev \
+    && docker-php-ext-install pdo_pgsql mbstring zip curl \
+    && rm -rf /var/lib/apt/lists/*
 
-EXPOSE 80
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+COPY . .
+
+EXPOSE 10000
+CMD ["sh", "-c", "php -S 0.0.0.0:${PORT:-10000} -t /var/www/html"]

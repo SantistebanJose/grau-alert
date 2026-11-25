@@ -1,0 +1,12 @@
+.git
+.github
+.agents
+vendor
+config.local.php
+*.xlsx
+*.xls
+*.pptx
+*.docx
+*.pdf
+README.md
+Informe_*
