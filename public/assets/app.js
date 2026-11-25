@@ -94,6 +94,24 @@
     if (name === 'scanner') startScanner(); else stopScanner();
   }
   $$('[data-goto]').forEach(b => b.addEventListener('click', () => { const links = { dashboard: 'index.php', students: 'estudiantes.php', scanner: 'asistencia.php', community: 'comunidad.php', calendar: 'calendario.php', reports: 'reportes.php', alerts: 'avisos.php', family: 'familia.php' }; location.href = links[b.dataset.goto] || 'index.php'; }));
+  $('#mobile-menu-toggle').addEventListener('click', () => {
+    const panel = $('#mobile-menu-panel');
+    const open = panel.classList.toggle('open');
+    $('.sidebar').classList.toggle('mobile-open', open);
+    $('#mobile-menu-backdrop').classList.toggle('visible', open);
+    $('#mobile-menu-toggle').setAttribute('aria-expanded', String(open));
+  });
+  $('#mobile-menu-backdrop').addEventListener('click', () => {
+    $('#mobile-menu-panel').classList.remove('open');
+    $('.sidebar').classList.remove('mobile-open');
+    $('#mobile-menu-backdrop').classList.remove('visible');
+    $('#mobile-menu-toggle').setAttribute('aria-expanded', 'false');
+  });
+  document.addEventListener('click', event => {
+    const panel = $('#mobile-menu-panel');
+    if (!panel || !panel.classList.contains('open') || panel.contains(event.target) || $('#mobile-menu-toggle').contains(event.target)) return;
+    panel.classList.remove('open'); $('.sidebar').classList.remove('mobile-open'); $('#mobile-menu-backdrop').classList.remove('visible'); $('#mobile-menu-toggle').setAttribute('aria-expanded', 'false');
+  });
   $$('[data-close]').forEach(b => b.addEventListener('click', () => $(`#${b.dataset.close}`).close()));
 
   async function loadDashboard() {
