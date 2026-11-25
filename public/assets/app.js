@@ -684,6 +684,11 @@
     for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
     return bytes;
   }
+  function samePushKey(left, right) {
+    if (!left || !right || left.byteLength !== right.byteLength) return false;
+    const a = new Uint8Array(left), b = right instanceof Uint8Array ? right : new Uint8Array(right);
+    return a.every((byte, index) => byte === b[index]);
+  }
   async function initFamilyPush() {
     const button = $('#push-enable'), status = $('#push-status');
     if (!button || button.dataset.ready === '1') return;
@@ -693,9 +698,19 @@
       const config = await request('push_config');
       if (!config.enabled || !config.public_key) { status.textContent = config.message || 'Falta configurar el envío push en el servidor.'; button.textContent = 'Notificaciones no configuradas'; return; }
       const registration = await navigator.serviceWorker.register('service-worker.js');
+      const expectedKey = pushApplicationKey(config.public_key);
       let subscription = await registration.pushManager.getSubscription();
+      const existingKey = subscription?.options?.applicationServerKey;
+      const savedKey = localStorage.getItem('grauPushPublicKey');
+      const keyChanged = (existingKey && !samePushKey(existingKey, expectedKey)) || (savedKey && savedKey !== config.public_key);
+      if (subscription && keyChanged) {
+        await request('push_subscription_delete', { method: 'POST', data: { endpoint: subscription.endpoint } });
+        await subscription.unsubscribe();
+        subscription = null;
+      }
       if (subscription) {
         await request('push_subscription_save', { method: 'POST', data: { subscription: subscription.toJSON() } });
+        localStorage.setItem('grauPushPublicKey', config.public_key);
         button.textContent = 'Notificaciones activas'; status.textContent = 'Este dispositivo recibirá avisos de tus estudiantes.'; return;
       }
       if (Notification.permission === 'denied') { status.textContent = 'Las notificaciones están bloqueadas en los permisos del navegador.'; return; }
@@ -705,8 +720,9 @@
         try {
           const permission = await Notification.requestPermission();
           if (permission !== 'granted') throw new Error('No se otorgó permiso para mostrar notificaciones.');
-          subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushApplicationKey(config.public_key) });
+          subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: expectedKey });
           await request('push_subscription_save', { method: 'POST', data: { subscription: subscription.toJSON() } });
+          localStorage.setItem('grauPushPublicKey', config.public_key);
           button.textContent = 'Notificaciones activas'; status.textContent = 'Este dispositivo recibirá avisos de tus estudiantes.'; toast('Notificaciones activadas en este dispositivo.');
         } catch (error) { button.disabled = false; status.textContent = error.message; toast(error.message, true); }
       });
