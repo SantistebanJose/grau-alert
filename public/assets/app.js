@@ -692,8 +692,18 @@
   }
   async function initFamilyPush() {
     const button = $('#push-enable'), status = $('#push-status');
+    const testButton = $('#push-test');
     if (!button || button.dataset.ready === '1') return;
     button.dataset.ready = '1'; button.disabled = true;
+    if (testButton && testButton.dataset.ready !== '1') {
+      testButton.dataset.ready = '1';
+      testButton.addEventListener('click', async () => {
+        testButton.disabled = true;
+        try { await request('push_test', { method: 'POST', data: {} }); toast('Notificación enviada al servicio. Revisa las notificaciones de este dispositivo.'); }
+        catch (error) { toast(error.message || 'No se pudo enviar la notificación de prueba.', true); }
+        finally { testButton.disabled = false; }
+      });
+    }
     try {
       if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) throw new Error('Este navegador no admite notificaciones push.');
       const config = await request('push_config');
@@ -712,6 +722,7 @@
       if (subscription) {
         await request('push_subscription_save', { method: 'POST', data: { subscription: subscription.toJSON() } });
         localStorage.setItem('grauPushPublicKey', config.public_key);
+        if (testButton) testButton.classList.remove('hidden');
         button.textContent = 'Notificaciones activas'; status.textContent = 'Este dispositivo recibirá avisos de tus estudiantes.'; return;
       }
       if (Notification.permission === 'denied') { status.textContent = 'Las notificaciones están bloqueadas en los permisos del navegador.'; return; }
@@ -724,6 +735,7 @@
           subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: expectedKey });
           await request('push_subscription_save', { method: 'POST', data: { subscription: subscription.toJSON() } });
           localStorage.setItem('grauPushPublicKey', config.public_key);
+          if (testButton) testButton.classList.remove('hidden');
           button.textContent = 'Notificaciones activas'; status.textContent = 'Este dispositivo recibirá avisos de tus estudiantes.'; toast('Notificaciones activadas en este dispositivo.');
         } catch (error) { button.disabled = false; status.textContent = error.message; toast(error.message, true); }
       });

@@ -21,6 +21,51 @@ final class PushNotification
         return app_setting('PUSH_VAPID_PUBLIC_KEY');
     }
 
+    public static function sendTestToGuardian(PDO $db, string $guardianId): string
+    {
+        if (!self::configured()) return 'not_configured';
+        try {
+            require_once dirname(__DIR__) . '/vendor/autoload.php';
+            $stmt = $db->prepare('select endpoint,p256dh,auth from public.push_subscriptions where apoderado_id=:guardian');
+            $stmt->execute(['guardian' => $guardianId]);
+            $rows = $stmt->fetchAll();
+            if (!$rows) return 'no_subscription';
+
+            $webPush = new \Minishlink\WebPush\WebPush([
+                'VAPID' => [
+                    'subject' => app_setting('PUSH_VAPID_SUBJECT', 'mailto:soporte@grau-alert.edu.pe'),
+                    'publicKey' => self::publicKey(),
+                    'privateKey' => app_setting('PUSH_VAPID_PRIVATE_KEY'),
+                ],
+            ], ['TTL' => 300, 'urgency' => 'high']);
+            $payload = json_encode([
+                'title' => 'Grau-Alert: prueba de notificaciones',
+                'body' => 'Tu dispositivo está listo para recibir avisos de asistencia.',
+                'url' => 'familia.php',
+                'tag' => 'grau-alert-prueba-' . bin2hex(random_bytes(4)),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if ($payload === false) return 'failed';
+            foreach ($rows as $row) {
+                $webPush->queueNotification(
+                    \Minishlink\WebPush\Subscription::create([
+                        'endpoint' => $row['endpoint'],
+                        'keys' => ['p256dh' => $row['p256dh'], 'auth' => $row['auth']],
+                    ]),
+                    $payload
+                );
+            }
+            $sent = false;
+            foreach ($webPush->flush() as $report) {
+                if ($report->isSuccess()) $sent = true;
+                else error_log('Grau-Alert push test failed: ' . $report->getReason());
+            }
+            return $sent ? 'sent' : 'failed';
+        } catch (Throwable $e) {
+            error_log('Grau-Alert push test: ' . $e->getMessage());
+            return 'failed';
+        }
+    }
+
     public static function sendForAttendance(PDO $db, string $studentId, string $attendanceId, string $kind, string $message): void
     {
         self::sendBatch($db, [['student_id' => $studentId, 'attendance_id' => $attendanceId, 'kind' => $kind, 'message' => $message]]);

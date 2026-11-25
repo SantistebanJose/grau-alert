@@ -115,6 +115,17 @@ try {
         $delete->execute(['guardian' => $guardian['id'], 'endpoint' => $endpoint]);
         respond(['ok' => true]);
     }
+    if ($action === 'push_test' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $guardian = require_user(['apoderado']);
+        $lastTest = (int)($_SESSION['push_test_last'] ?? 0);
+        if (time() - $lastTest < 30) respond(['error' => 'Espera unos segundos antes de enviar otra prueba.'], 429);
+        $_SESSION['push_test_last'] = time();
+        $result = PushNotification::sendTestToGuardian($pdo, (string)$guardian['id']);
+        if ($result === 'not_configured') respond(['error' => 'Las notificaciones no están configuradas en el servidor.'], 503);
+        if ($result === 'no_subscription') respond(['error' => 'Este dispositivo aún no está suscrito. Pulsa Activar notificaciones primero.'], 409);
+        if ($result !== 'sent') respond(['error' => 'Render no pudo entregar la notificación. Revisa los registros del servicio.'], 502);
+        respond(['ok' => true]);
+    }
     if ($action === 'family_home' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $user = require_user(['apoderado']);
         $stmt = $pdo->prepare("select e.id,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,e.foto_url,g.nombre as grado,ea.parentesco from public.estudiante_apoderados ea join public.estudiantes e on e.id=ea.estudiante_id left join public.grados g on g.id=e.grado_id where ea.apoderado_id=:uid and e.activo=true order by e.apellidos,e.nombres");
