@@ -515,6 +515,20 @@ try {
         $student['already_marked'] = $check->fetch() ?: null;
         respond(['student' => $student]);
     }
+    if ($action === 'student_by_dni' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $dni = trim((string)($_GET['dni'] ?? ''));
+        if (!preg_match('/^\\d{8}$/', $dni)) respond(['error' => 'Ingresa un DNI válido de 8 dígitos.'], 422);
+        $lookup = $pdo->prepare('select qr_token from public.estudiantes where dni=:dni and activo=true limit 1');
+        $lookup->execute(['dni' => $dni]);
+        $token = $lookup->fetchColumn();
+        if (!$token) respond(['error' => 'No se encontró un estudiante activo con ese DNI.'], 404);
+        $student = StudentModel::byQr($pdo, (string)$token);
+        if (!$student) respond(['error' => 'No se encontró un estudiante activo con ese DNI.'], 404);
+        $check = $pdo->prepare("select id,hora_ingreso,estado from public.asistencias where estudiante_id=:id and fecha=(now() at time zone 'America/Lima')::date");
+        $check->execute(['id' => $student['id']]);
+        $student['already_marked'] = $check->fetch() ?: null;
+        respond(['student' => $student]);
+    }
     if ($action === 'attendance_confirm' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $token = trim((string)($data['token'] ?? ''));
         if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $token)) respond(['error' => 'Este código no corresponde a un carné QR de Grau-Alert.'], 422);

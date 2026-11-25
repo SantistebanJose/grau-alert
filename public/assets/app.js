@@ -664,6 +664,15 @@
   });
   async function findToken(token) {
     token = token.trim(); if (!token) return;
+    // Si se escriben exactamente 8 dígitos, buscar por DNI como alternativa al carné.
+    if (/^\d{8}$/.test(token)) {
+      try {
+        const result = await request('student_by_dni', { query: `&dni=${encodeURIComponent(token)}` });
+        state.currentToken = result.student.qr_token;
+        showVerify(result.student);
+      } catch (e) { state.currentToken = ''; showVerifyError(e.message); }
+      return;
+    }
     // El carné Grau-Alert contiene un UUID. Evita enviar al servidor datos
     // de otros QR (por ejemplo, los QR antiguos del Excel) como si fueran UUID.
     const uuid = token.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
@@ -703,7 +712,7 @@
     if (state.scanner) return;
     const node = $('#reader'); node.innerHTML = '';
     if (!window.Html5Qrcode) {
-      node.innerHTML = '<div class="empty-state">No cargó el lector QR. Comprueba tu conexión a internet y recarga la página. También puedes pegar el UUID del QR en el campo de abajo.</div>';
+      node.innerHTML = '<div class="empty-state">No cargó el lector QR. Comprueba tu conexión a internet y recarga la página. También puedes buscar al estudiante por DNI debajo.</div>';
       return;
     }
     const scanner = new Html5Qrcode('reader'); state.scanner = scanner;
