@@ -1,7 +1,7 @@
 (() => {
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
-  const state = { csrf: '', user: null, students: [], communityGuardians: [], scanner: null, currentToken: '', scanTimer: null, dbReady: false };
+  const state = { csrf: '', user: null, students: [], communityGuardians: [], scanner: null, currentToken: '', currentStudent: null, attendanceMode: 'ingreso', scanTimer: null, dbReady: false };
   const toast = (message, error = false) => {
     const el = $('#toast'); el.textContent = message; el.classList.toggle('error', error); el.classList.add('show');
     clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.remove('show'), 3400);
@@ -25,6 +25,15 @@
     if (digits.startsWith('0') && digits.length === 10) return `51${digits.slice(1)}`;
     return digits;
   };
+
+  const accountMenuQuery = window.matchMedia('(max-width: 760px)');
+  function positionAccountMenu() {
+    const menu = $('.account-menu');
+    const host = accountMenuQuery.matches ? $('.sidebar') : $('.topbar-actions');
+    if (menu && host && menu.parentElement !== host) host.append(menu);
+  }
+  positionAccountMenu();
+  accountMenuQuery.addEventListener?.('change', positionAccountMenu);
 
   async function boot() {
     try {
@@ -52,15 +61,16 @@
     $('#user-role').textContent = user.rol;
     $('#today-label').textContent = new Intl.DateTimeFormat('es-PE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Lima' }).format(new Date());
     const family = user.rol === 'apoderado';
+    updateProfileSummary(user);
     if (user.rol !== 'administrador') $('#new-student-btn').classList.add('hidden');
     $$('.admin-only').forEach(el => el.classList.toggle('hidden', user.rol !== 'administrador'));
     $$('.report-only').forEach(el => el.classList.toggle('hidden', !['administrador', 'tutor'].includes(user.rol)));
     $$('.family-only').forEach(el => el.classList.toggle('hidden', !family));
     if (family) {
-      $$('.page').forEach(el => { if (el.id !== 'page-family') el.classList.add('hidden'); });
+      $$('.page').forEach(el => { if (!['page-family', 'page-profile'].includes(el.id)) el.classList.add('hidden'); });
       $$('.nav-link').forEach(el => { if (!el.classList.contains('family-only')) el.classList.add('hidden'); });
       $('#family-name').textContent = user.nombres.split(' ')[0];
-      setPage('family');
+      setPage(window.INITIAL_PAGE === 'profile' ? 'profile' : 'family');
     } else {
       let initial = window.INITIAL_PAGE || 'dashboard';
       if (user.rol === 'auxiliar' && ['community', 'calendar', 'reports', 'alerts', 'family'].includes(initial)) initial = 'dashboard';
@@ -77,13 +87,67 @@
   }
   $('#login-form').addEventListener('submit', e => { e.preventDefault(); authSubmit(e.currentTarget, 'login'); });
   $('#setup-form').addEventListener('submit', e => { e.preventDefault(); authSubmit(e.currentTarget, 'setup'); });
-  $('#logout-btn').addEventListener('click', async () => { try { await request('logout', { method: 'POST', data: {} }); location.href = 'login.php'; } catch (e) { toast(e.message, true); } });
+  async function logoutCurrentUser() { try { await request('logout', { method: 'POST', data: {} }); location.href = 'login.php'; } catch (e) { toast(e.message, true); } }
+  $('#logout-btn').addEventListener('click', logoutCurrentUser);
+  $('#topbar-logout').addEventListener('click', logoutCurrentUser);
+  $('#profile-menu-toggle').addEventListener('click', event => {
+    event.stopPropagation();
+    const panel = $('#profile-menu'); const open = panel.classList.toggle('hidden') === false;
+    $('#profile-menu-toggle').setAttribute('aria-expanded', String(open));
+  });
+  document.addEventListener('click', event => {
+    if (event.target.closest('.account-menu')) return;
+    $('#profile-menu').classList.add('hidden');
+    $('#profile-menu-toggle').setAttribute('aria-expanded', 'false');
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    $('#profile-menu').classList.add('hidden');
+    $('#profile-menu-toggle').setAttribute('aria-expanded', 'false');
+  });
+
+  function updateProfileSummary(user) {
+    if (!user) return;
+    const name = `${user.nombres || ''} ${user.apellidos || ''}`.trim();
+    $('#user-name').textContent = name || 'Usuario';
+    $('#topbar-user-name').textContent = name || 'Usuario';
+    $('#user-role').textContent = user.rol || 'Cuenta';
+    $('#profile-display-name').textContent = name || 'Usuario';
+    $('#profile-display-role').textContent = user.rol || 'Cuenta';
+    if (user.rol === 'apoderado') $('#family-name').textContent = (user.nombres || '').split(' ')[0];
+    if ($('#greeting-name')) $('#greeting-name').textContent = (user.nombres || '').split(' ')[0];
+  }
+  function loadProfileForm() {
+    const form = $('#profile-form');
+    if (!form || !state.user) return;
+    for (const key of ['nombres', 'apellidos', 'correo', 'telefono']) form.elements[key].value = state.user[key] || '';
+    form.elements.current_password.value = '';
+    form.elements.new_password.value = '';
+    form.elements.confirm_password.value = '';
+    updateProfileSummary(state.user);
+  }
+  $('#profile-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form).entries());
+    if (data.new_password !== data.confirm_password) { toast('La nueva contraseña y su confirmación no coinciden.', true); return; }
+    delete data.confirm_password;
+    try {
+      const result = await request('profile_update', { method: 'POST', data });
+      state.user = result.user;
+      updateProfileSummary(result.user);
+      form.elements.current_password.value = '';
+      form.elements.new_password.value = '';
+      form.elements.confirm_password.value = '';
+      toast('Tu perfil se actualizó correctamente.');
+    } catch (error) { toast(error.message, true); }
+  });
 
   function setPage(name) {
     $$('.page').forEach(p => p.classList.add('hidden'));
     $(`#page-${name}`).classList.remove('hidden');
     $$('.nav-link').forEach(b => b.classList.toggle('active', b.dataset.page === name));
-    $('#page-title').textContent = ({ dashboard: 'Resumen', students: 'Estudiantes', scanner: 'Marcar asistencia', community: 'Comunidad escolar', calendar: 'Calendario escolar', reports: 'Reportes', alerts: 'Avisos', family: 'Portal familiar' })[name];
+    $('#page-title').textContent = ({ dashboard: 'Resumen', students: 'Estudiantes', scanner: 'Marcar asistencia', community: 'Comunidad escolar', calendar: 'Calendario escolar', reports: 'Reportes', alerts: 'Avisos', family: 'Portal familiar', profile: 'Mi perfil' })[name];
     if (name === 'students') { loadStudents(); loadGrades(); }
     if (name === 'dashboard') loadDashboard();
     if (name === 'community') loadCommunity();
@@ -91,9 +155,10 @@
     if (name === 'reports') loadReport();
     if (name === 'alerts') loadAlerts();
     if (name === 'family') loadFamily();
+    if (name === 'profile') loadProfileForm();
     if (name === 'scanner') startScanner(); else stopScanner();
   }
-  $$('[data-goto]').forEach(b => b.addEventListener('click', () => { const links = { dashboard: 'index.php', students: 'estudiantes.php', scanner: 'asistencia.php', community: 'comunidad.php', calendar: 'calendario.php', reports: 'reportes.php', alerts: 'avisos.php', family: 'familia.php' }; location.href = links[b.dataset.goto] || 'index.php'; }));
+  $$('[data-goto]').forEach(b => b.addEventListener('click', () => { const links = { dashboard: 'index.php', students: 'estudiantes.php', scanner: 'asistencia.php', community: 'comunidad.php', calendar: 'calendario.php', reports: 'reportes.php', alerts: 'avisos.php', family: 'familia.php', profile: 'perfil.php' }; location.href = links[b.dataset.goto] || 'index.php'; }));
   $('#mobile-menu-toggle').addEventListener('click', () => {
     const panel = $('#mobile-menu-panel');
     const open = panel.classList.toggle('open');
@@ -123,10 +188,11 @@
       $('#stat-last').textContent = last ? new Date(last.hora_ingreso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' }) : '—';
       $('#stat-last-name').textContent = last ? fullName(last) : 'Esperando asistencia';
       const rows = $('#attendance-rows');
-      rows.innerHTML = log.attendance.map(a => `<tr><td><div class="student-cell">${photo(a.foto_url, fullName(a))}<div><b>${esc(fullName(a))}</b><small>DNI ${esc(a.dni || '—')} · Código ${esc(a.codigo)}</small></div></div></td><td>${esc(a.grado || 'Sin grado')}</td><td>${new Date(a.hora_ingreso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' })}</td><td><span class="badge ${a.estado === 'tardanza' ? 'late-badge' : ''}">${a.estado === 'tardanza' ? 'Tardanza' : 'Presente'}</span></td></tr>`).join('');
+      rows.innerHTML = log.attendance.map(a => `<tr><td><div class="student-cell">${photo(a.foto_url, fullName(a))}<div><b>${esc(fullName(a))}</b><small>DNI ${esc(a.dni || '—')} · Código ${esc(a.codigo)}</small></div></div></td><td>${esc(a.grado || 'Sin grado')}</td><td>${formatAttendanceTime(a.hora_ingreso)}</td><td>${formatAttendanceTime(a.hora_salida)}</td><td><span class="badge ${a.estado === 'tardanza' ? 'late-badge' : ''}">${a.estado === 'tardanza' ? 'Tardanza' : 'Presente'}</span></td></tr>`).join('');
       $('#attendance-empty').classList.toggle('hidden', log.attendance.length > 0);
     } catch (e) { toast(e.message, true); }
   }
+  const formatAttendanceTime = value => value ? new Date(value).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' }) : '—';
   function photo(url, name, cls = 'student-photo') { return url ? `<img class="${cls}" src="${esc(url)}" alt="Foto de ${esc(name)}" referrerpolicy="no-referrer" onerror="this.outerHTML='<span class=\'${cls}\'>${esc(initials(name))}</span>'">` : `<span class="${cls}">${esc(initials(name))}</span>`; }
   const studentFilter = { level: 'primaria', grade: 'todos' };
   const gradeOrder = ['primero', 'segundo', 'tercero', 'cuarto', 'quinto', 'sexto'];
@@ -562,8 +628,9 @@
       $('#report-unregistered').textContent = totals.excused;
       $('#report-rows').innerHTML = reportRowsFiltered.map(r => {
         const details = (r.detalle || []).map(d => {
-          const time = d.hora ? ' (' + new Date(d.hora).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' }) + ')' : '';
-          return `${d.fecha}: ${d.estado}${time}`;
+          const time = d.hora ? ' · ingreso ' + formatAttendanceTime(d.hora) : '';
+          const exit = d.hora_salida ? ' · salida ' + formatAttendanceTime(d.hora_salida) : '';
+          return `${d.fecha}: ${d.estado}${time}${exit}`;
         }).join('<br>');
         return `<tr><td>${esc(`${r.nombres} ${r.apellidos}`)}<small>DNI ${esc(r.dni || '—')} · Código ${esc(r.codigo)}<br>${details || 'Sin registros en el período'}</small></td><td>${esc(r.grado || '—')}</td><td>${r.presentes}</td><td>${r.tardanzas}</td><td>${r.faltas}</td><td>${r.justificadas}</td></tr>`;
       }).join('');
@@ -573,7 +640,7 @@
     }
     $('#report-unregistered').previousElementSibling.textContent = 'Sin registro';
     $('#export-report').classList.remove('hidden'); $('#close-day').classList.remove('hidden');
-    $('#report-rows').closest('table').querySelector('thead').innerHTML = '<tr><th>ESTUDIANTE</th><th>GRADO</th><th>ESTADO</th><th>HORA</th><th>AVISO WHATSAPP</th></tr>';
+    $('#report-rows').closest('table').querySelector('thead').innerHTML = '<tr><th>ESTUDIANTE</th><th>GRADO</th><th>ESTADO</th><th>HORA DE INGRESO</th><th>HORA DE SALIDA</th><th>AVISO WHATSAPP</th></tr>';
     const present = reportRowsFiltered.filter(r => ['presente', 'tardanza'].includes(r.estado)).length;
     const absences = reportRowsFiltered.filter(r => r.estado === 'falta').length;
     const unregistered = reportRowsFiltered.filter(r => !r.estado).length;
@@ -597,8 +664,9 @@
         ? ` <button type="button" class="btn btn-ghost report-mark-sent" data-report-student="${esc(r.estudiante_id)}" data-report-attendance="${esc(r.asistencia_id)}" data-report-guardian="${esc(r.apoderado_id)}" data-report-message="${esc(message)}">Marcar enviada</button>` : '';
       const noticeCell = markedSent ? '<span class="report-sent">Aviso enviado</span>' : `${sendNotice}${markNotice}`;
       const time = r.estado === 'falta' || !r.hora_ingreso ? '—' : new Date(r.hora_ingreso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' });
+      const departureTime = formatAttendanceTime(r.hora_salida);
       const badgeClass = r.estado === 'falta' ? 'absent-badge' : r.estado === 'tardanza' ? 'late-badge' : '';
-      return `<tr><td>${esc(full)}<small>DNI ${esc(r.dni || '—')} · Código ${esc(r.codigo)}${r.telefono_apoderado ? `<br>Contacto apoderado: ${esc(r.telefono_apoderado)}` : '<br>Sin teléfono del apoderado'}</small></td><td>${esc(r.grado || '—')}</td><td><span class="badge ${badgeClass}">${r.estado ? names[r.estado] || esc(r.estado) : 'Sin registro'}</span></td><td>${time}</td><td><div class="report-notice-actions">${noticeCell}</div></td></tr>`;
+      return `<tr><td>${esc(full)}<small>DNI ${esc(r.dni || '—')} · Código ${esc(r.codigo)}${r.telefono_apoderado ? `<br>Contacto apoderado: ${esc(r.telefono_apoderado)}` : '<br>Sin teléfono del apoderado'}</small></td><td>${esc(r.grado || '—')}</td><td><span class="badge ${badgeClass}">${r.estado ? names[r.estado] || esc(r.estado) : 'Sin registro'}</span></td><td>${time}</td><td>${departureTime}</td><td><div class="report-notice-actions">${noticeCell}</div></td></tr>`;
     }).join('');
     $$('[data-report-student]').forEach(button => button.addEventListener('click', async () => {
       if (!confirm('¿Ya enviaste este mensaje desde WhatsApp?')) return;
@@ -632,7 +700,7 @@
   });
   $('#export-report').addEventListener('click', () => {
     if (!reportData) { toast('Primero consulta un reporte.', true); return; }
-    const cells = [['DNI', 'Código Estudiante', 'Estudiante', 'Grado', 'Estado', 'Hora'], ...reportRowsFiltered.map(r => [r.dni || '', r.codigo, `${r.nombres} ${r.apellidos}`, r.grado || '', r.estado || 'Sin registro', r.estado === 'falta' ? '' : (r.hora_ingreso || '')])];
+    const cells = [['DNI', 'Código Estudiante', 'Estudiante', 'Grado', 'Estado', 'Hora de ingreso', 'Hora de salida'], ...reportRowsFiltered.map(r => [r.dni || '', r.codigo, `${r.nombres} ${r.apellidos}`, r.grado || '', r.estado || 'Sin registro', r.estado === 'falta' ? '' : (r.hora_ingreso || ''), r.hora_salida || ''])];
     const csv = '\ufeff' + cells.map(row => row.map(v => `"${String(v).replaceAll('"', '""')}"`).join(',')).join('\r\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); a.download = `asistencia-${reportData.summary.fecha}.csv`; a.click(); URL.revokeObjectURL(a.href);
   });
@@ -640,9 +708,9 @@
     if (!reportData) { toast('Primero consulta un reporte.', true); return; }
     const period = $('#report-period').value;
     const rows = reportRowsFiltered.map(r => period === 'day'
-      ? [r.dni || '', r.codigo, `${r.nombres} ${r.apellidos}`, r.grado || '', r.estado || 'Sin registro', r.hora_ingreso || '']
-      : [r.dni || '', r.codigo, `${r.nombres} ${r.apellidos}`, r.grado || '', r.presentes, r.tardanzas, r.faltas, r.justificadas, ...(r.detalle || []).map(d => `${d.fecha}: ${d.estado}`)]);
-    const headers = period === 'day' ? ['DNI','Código','Estudiante','Grado','Estado','Hora'] : ['DNI','Código','Estudiante','Grado','Presentes','Tardanzas','Faltas','Justificadas','Detalle diario'];
+      ? [r.dni || '', r.codigo, `${r.nombres} ${r.apellidos}`, r.grado || '', r.estado || 'Sin registro', r.hora_ingreso || '', r.hora_salida || '']
+      : [r.dni || '', r.codigo, `${r.nombres} ${r.apellidos}`, r.grado || '', r.presentes, r.tardanzas, r.faltas, r.justificadas, ...(r.detalle || []).map(d => `${d.fecha}: ${d.estado}${d.hora ? ` · ingreso ${formatAttendanceTime(d.hora)}` : ''}${d.hora_salida ? ` · salida ${formatAttendanceTime(d.hora_salida)}` : ''}`)]);
+    const headers = period === 'day' ? ['DNI','Código','Estudiante','Grado','Estado','Hora de ingreso','Hora de salida'] : ['DNI','Código','Estudiante','Grado','Presentes','Tardanzas','Faltas','Justificadas','Detalle diario'];
     const sheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Asistencia');
     XLSX.writeFile(book, `Grau-Alert-${period}-${$('#report-date').value}.xlsx`);
@@ -746,7 +814,7 @@
     try {
       const result = await request('family_home'); const root = $('#family-students');
       if (!result.students.length) { root.innerHTML = '<div class="content-card family-empty">Tu cuenta aún no tiene estudiantes vinculados. Comunícate con la institución.</div>'; return; }
-      root.innerHTML = result.students.map(s => `<article class="family-card"><div class="family-head">${s.foto_url ? `<img src="${esc(s.foto_url)}" alt="">` : `<div class="family-avatar">${esc(initials(fullName(s)))}</div>`}<div><h2>${esc(fullName(s))}</h2><p>${esc(s.grado || 'Estudiante')}${s.parentesco ? ` · ${esc(s.parentesco)}` : ''}</p></div></div><h3>ÚLTIMAS ASISTENCIAS</h3>${s.asistencias.length ? s.asistencias.slice(0, 8).map(a => `<div class="family-item"><b>${new Date(`${a.fecha}T12:00:00`).toLocaleDateString('es-PE', { dateStyle: 'full' })} · ${esc(a.estado)}</b><small>${a.hora_ingreso ? new Date(a.hora_ingreso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' }) : 'Sin hora'}</small></div>`).join('') : '<p class="family-empty">Aún no hay asistencias.</p>'}<h3>AVISOS DE LA INSTITUCIÓN</h3>${s.avisos.length ? s.avisos.slice(0, 6).map(a => `<div class="family-item"><b>${esc(a.tipo)}</b><small>${esc(a.mensaje)} · ${new Date(a.creado_en).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Lima' })}</small></div>`).join('') : '<p class="family-empty">Aún no hay avisos.</p>'}</article>`).join('');
+      root.innerHTML = result.students.map(s => `<article class="family-card"><div class="family-head">${s.foto_url ? `<img src="${esc(s.foto_url)}" alt="">` : `<div class="family-avatar">${esc(initials(fullName(s)))}</div>`}<div><h2>${esc(fullName(s))}</h2><p>${esc(s.grado || 'Estudiante')}${s.parentesco ? ` · ${esc(s.parentesco)}` : ''}</p></div></div><h3>ÚLTIMAS ASISTENCIAS</h3>${s.asistencias.length ? s.asistencias.slice(0, 8).map(a => `<div class="family-item"><b>${new Date(`${a.fecha}T12:00:00`).toLocaleDateString('es-PE', { dateStyle: 'full' })} · ${esc(a.estado)}</b><small>Ingreso: ${formatAttendanceTime(a.hora_ingreso)} · Salida: ${formatAttendanceTime(a.hora_salida)}</small></div>`).join('') : '<p class="family-empty">Aún no hay asistencias.</p>'}<h3>AVISOS DE LA INSTITUCIÓN</h3>${s.avisos.length ? s.avisos.slice(0, 6).map(a => `<div class="family-item"><b>${esc(a.tipo)}</b><small>${esc(a.mensaje)} · ${new Date(a.creado_en).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Lima' })}</small></div>`).join('') : '<p class="family-empty">Aún no hay avisos.</p>'}</article>`).join('');
     } catch (e) { toast(e.message, true); }
   }
   function showCard(student) {
@@ -783,6 +851,18 @@
     const link = document.createElement('a'); link.href = dataUrl; link.download = `QR-${code}.png`; document.body.appendChild(link); link.click(); link.remove();
     toast('QR descargado como imagen PNG.');
   });
+  function setAttendanceMode(mode) {
+    state.attendanceMode = mode === 'salida' ? 'salida' : 'ingreso';
+    $$('.attendance-mode').forEach(button => button.classList.toggle('active', button.dataset.attendanceMode === state.attendanceMode));
+    const departure = state.attendanceMode === 'salida';
+    $('#scanner-eyebrow').textContent = departure ? 'CONTROL DE SALIDA' : 'CONTROL DE INGRESO';
+    $('#scanner-title').textContent = departure ? 'Registrar salida' : 'Marcar asistencia';
+    $('#scanner-description').textContent = departure ? 'Escanea el carné o busca por DNI y confirma la salida del estudiante.' : 'Escanea el carné y confirma visualmente que corresponde al estudiante.';
+    $('#scanner-card-title').textContent = departure ? 'Escáner para salida' : 'Escáner de carné';
+    $('#scanner-help-text').textContent = departure ? 'Registra la salida solo después de verificar que el estudiante se retira.' : 'Verifica la foto y los datos del estudiante antes de confirmar la asistencia.';
+    if (state.currentStudent) showVerify(state.currentStudent);
+  }
+  $$('.attendance-mode').forEach(button => button.addEventListener('click', () => setAttendanceMode(button.dataset.attendanceMode)));
   async function findToken(token) {
     token = token.trim(); if (!token) return;
     // Si se escriben exactamente 8 dígitos, buscar por DNI como alternativa al carné.
@@ -790,8 +870,9 @@
       try {
         const result = await request('student_by_dni', { query: `&dni=${encodeURIComponent(token)}` });
         state.currentToken = result.student.qr_token;
+        state.currentStudent = result.student;
         showVerify(result.student);
-      } catch (e) { state.currentToken = ''; showVerifyError(e.message); }
+      } catch (e) { state.currentToken = ''; state.currentStudent = null; showVerifyError(e.message); }
       return;
     }
     // El carné Grau-Alert contiene un UUID. Evita enviar al servidor datos
@@ -799,32 +880,57 @@
     const uuid = token.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
     if (uuid) token = uuid[0];
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(token)) {
-      state.currentToken = ''; showVerifyError('Este código no es un QR de carné Grau-Alert. Abre el carné del estudiante y escanea su QR nuevo.'); return;
+      state.currentToken = ''; state.currentStudent = null; showVerifyError('Este código no es un QR de carné Grau-Alert. Abre el carné del estudiante y escanea su QR nuevo.'); return;
     }
     try {
       const result = await request('student_by_qr', { query: `&token=${encodeURIComponent(token)}` });
-      state.currentToken = token; showVerify(result.student);
-    } catch (e) { state.currentToken = ''; showVerifyError(e.message); }
+      state.currentToken = token; state.currentStudent = result.student; showVerify(result.student);
+    } catch (e) { state.currentToken = ''; state.currentStudent = null; showVerifyError(e.message); }
   }
   function showVerify(student) {
-    const already = student.already_marked, absence = already?.estado === 'falta', locked = !!already && !absence;
+    const already = student.already_marked, departure = state.attendanceMode === 'salida';
+    const absence = already?.estado === 'falta';
+    const hasArrival = !!already && ['presente', 'tardanza'].includes(already.estado);
+    const exitDone = !!already?.hora_salida;
+    const locked = departure ? (!hasArrival || exitDone) : (!!already && !absence);
     const arrivalTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
     const cutoff = window.SCHOOL_LATE_AFTER || '07:30';
     const willBeLate = arrivalTime > cutoff;
-    const description = absence ? 'La falta estaba registrada. Verifica al estudiante para corregirla a presente.' : already ? `Ya se registró ${already.estado === 'tardanza' ? 'una tardanza' : 'la llegada'} hoy a las ${new Date(already.hora_ingreso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' })}.` : `Compara la foto del carné con el estudiante presente. ${willBeLate ? `Después de las ${cutoff}, esta llegada se marcará como tardanza.` : `La hora límite para tardanza es ${cutoff}.`}`;
-    const confirmLabel = locked ? 'Asistencia ya registrada' : absence ? '✓ Confirmar llegada' : willBeLate ? '✓ Confirmar tardanza' : '✓ Confirmar identidad y asistencia';
+    const description = departure
+      ? !already ? 'No hay un ingreso registrado hoy. Primero registra la llegada del estudiante.'
+        : !hasArrival ? 'El estudiante figura con falta o sin una asistencia válida; no se puede registrar su salida.'
+          : exitDone ? `La salida ya se registró hoy a las ${new Date(already.hora_salida).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' })}.`
+            : `Ingreso ${already.estado === 'tardanza' ? 'con tardanza' : 'registrado'} a las ${new Date(already.hora_ingreso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' })}. Verifica que el estudiante se retire.`
+      : absence ? 'La falta estaba registrada. Verifica al estudiante para corregirla a presente.' : already ? `Ya se registró ${already.estado === 'tardanza' ? 'una tardanza' : 'la llegada'} hoy a las ${new Date(already.hora_ingreso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' })}.` : `Compara la foto del carné con el estudiante presente. ${willBeLate ? `Después de las ${cutoff}, esta llegada se marcará como tardanza.` : `La hora límite para tardanza es ${cutoff}.`}`;
+    const confirmLabel = departure ? (exitDone ? 'Salida ya registrada' : hasArrival ? '✓ Confirmar salida' : 'Primero registra el ingreso') : locked ? 'Asistencia ya registrada' : absence ? '✓ Confirmar llegada' : willBeLate ? '✓ Confirmar tardanza' : '✓ Confirmar identidad y asistencia';
     const phone = whatsappPhone(student.telefono_apoderado);
     const sendNotice = locked && ['presente', 'tardanza'].includes(already?.estado) && phone.length >= 11 && phone.length <= 15
       ? `<a class="btn btn-secondary scanner-whatsapp" href="https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(`Buen día. Le informamos que ${fullName(student)} ${already.estado === 'tardanza' ? 'llegó tarde' : 'ingresó'} a la institución hoy a las ${new Date(already.hora_ingreso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' })}. - Grau-Alert.`)}" target="_blank" rel="noopener">Enviar aviso por WhatsApp</a>`
       : locked && ['presente', 'tardanza'].includes(already?.estado) ? '<p class="form-note">Registra un teléfono válido del apoderado para enviar el aviso.</p>' : '';
-    $('#verify-card').innerHTML = `<div class="verify-student">${student.foto_url ? `<img class="verify-photo" src="${esc(student.foto_url)}" alt="Foto de ${esc(fullName(student))}">` : `<div class="verify-photo" style="display:grid;place-items:center;margin:0 auto 11px;font-size:26px;font-weight:800;color:#102454">${esc(initials(fullName(student)))}</div>`}<h2>${esc(fullName(student))}</h2><p class="muted">${esc(student.grado || 'Sin grado')}</p><span class="verify-code">Código ${esc(student.codigo)}</span><p class="muted">Contacto del apoderado: ${esc(student.telefono_apoderado || 'No registrado')}</p><div class="verify-check">${description}</div><button id="confirm-attendance" class="btn btn-primary" ${locked ? 'disabled' : ''}>${confirmLabel}</button>${sendNotice}</div>`;
+    $('#verify-card').innerHTML = `<div class="verify-student">${student.foto_url ? `<img class="verify-photo" src="${esc(student.foto_url)}" alt="Foto de ${esc(fullName(student))}">` : `<div class="verify-photo" style="display:grid;place-items:center;margin:0 auto 11px;font-size:26px;font-weight:800;color:#102454">${esc(initials(fullName(student)))}</div>`}<h2>${esc(fullName(student))}</h2><p class="muted">${esc(student.grado || 'Sin grado')}</p><span class="verify-code">Código ${esc(student.codigo)}</span><p class="muted">Contacto del apoderado: ${esc(student.telefono_apoderado || 'No registrado')}</p><div class="verify-check">${description}</div><button id="confirm-attendance" class="btn btn-primary" ${locked ? 'disabled' : ''}>${confirmLabel}</button>${departure ? '' : sendNotice}</div>`;
     if (!locked) $('#confirm-attendance').addEventListener('click', confirmAttendance);
   }
   function showVerifyError(message) { $('#verify-card').innerHTML = `<div class="verify-placeholder"><div class="scan-symbol">!</div><b>No se pudo validar</b><p class="muted">${esc(message)}</p></div>`; }
   async function confirmAttendance() {
     const button = $('#confirm-attendance'); if (!button) return;
     button.disabled = true;
-    try { await request('attendance_confirm', { method: 'POST', data: { token: state.currentToken } }); toast('Asistencia confirmada.'); const token = state.currentToken; await findToken(token); loadDashboard(); }
+    try {
+      if (state.attendanceMode === 'salida') {
+        const result = await request('attendance_departure', { method: 'POST', data: { token: state.currentToken } });
+        const delivery = result.notificacion === 'sent'
+          ? 'Notificación enviada al apoderado.'
+          : result.notificacion === 'no_subscription'
+            ? 'El apoderado debe activar notificaciones en su celular.'
+            : result.notificacion === 'not_configured'
+              ? 'Las notificaciones push no están configuradas en el servidor.'
+              : 'No se pudo entregar el push; revisa los registros de Render.';
+        toast(`Salida registrada para ${result.estudiante}. ${delivery}`, result.notificacion !== 'sent');
+      } else {
+        await request('attendance_confirm', { method: 'POST', data: { token: state.currentToken } });
+        toast('Asistencia confirmada.');
+      }
+      const token = state.currentToken; await findToken(token); loadDashboard();
+    }
     catch (e) { toast(e.message, true); button.disabled = false; }
   }
   $('#manual-find').addEventListener('click', () => findToken($('#manual-qr').value));

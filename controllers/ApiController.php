@@ -126,12 +126,46 @@ try {
         if ($result !== 'sent') respond(['error' => 'Render no pudo entregar la notificación. Revisa los registros del servicio.'], 502);
         respond(['ok' => true]);
     }
+    if ($action === 'profile_update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $account = require_user();
+        $names = trim((string)($data['nombres'] ?? ''));
+        $last = trim((string)($data['apellidos'] ?? ''));
+        $email = strtolower(trim((string)($data['correo'] ?? '')));
+        $phone = trim((string)($data['telefono'] ?? ''));
+        $newPassword = (string)($data['new_password'] ?? '');
+        if ($names === '' || mb_strlen($names) > 100 || $last === '' || mb_strlen($last) > 100) respond(['error' => 'Ingresa nombres y apellidos (máximo 100 caracteres cada uno).'], 422);
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 254) respond(['error' => 'Ingresa un correo válido.'], 422);
+        if (mb_strlen($phone) > 30) respond(['error' => 'El teléfono no puede superar 30 caracteres.'], 422);
+        if ($newPassword !== '') {
+            if (strlen($newPassword) < 8 || strlen($newPassword) > 128) respond(['error' => 'La nueva contraseña debe tener entre 8 y 128 caracteres.'], 422);
+            $currentPassword = (string)($data['current_password'] ?? '');
+            $checkPassword = $pdo->prepare('select password_hash from public.usuarios where id=:id and activo=true');
+            $checkPassword->execute(['id' => $account['id']]);
+            $passwordHash = $checkPassword->fetchColumn();
+            if (!$passwordHash || !password_verify($currentPassword, (string)$passwordHash)) respond(['error' => 'La contraseña actual no es correcta.'], 403);
+        }
+        $sql = 'update public.usuarios set nombres=:nombres,apellidos=:apellidos,correo=:correo,telefono=:telefono';
+        $params = ['nombres' => $names, 'apellidos' => $last, 'correo' => $email, 'telefono' => $phone !== '' ? $phone : null, 'id' => $account['id']];
+        if ($newPassword !== '') { $sql .= ',password_hash=:password_hash'; $params['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT); }
+        $sql .= ' where id=:id and activo=true returning id,correo,nombres,apellidos,telefono,rol,activo';
+        try {
+            $update = $pdo->prepare($sql);
+            $update->execute($params);
+        } catch (PDOException $e) {
+            if ($e->getCode() === '23505') respond(['error' => 'Ese correo ya pertenece a otra cuenta.'], 409);
+            throw $e;
+        }
+        $updatedUser = $update->fetch();
+        if (!$updatedUser) respond(['error' => 'No se encontró una cuenta activa para actualizar.'], 404);
+        $_SESSION['user'] = $updatedUser;
+        respond(['ok' => true, 'user' => $updatedUser]);
+    }
     if ($action === 'family_home' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $user = require_user(['apoderado']);
         $stmt = $pdo->prepare("select e.id,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,e.foto_url,g.nombre as grado,ea.parentesco from public.estudiante_apoderados ea join public.estudiantes e on e.id=ea.estudiante_id left join public.grados g on g.id=e.grado_id where ea.apoderado_id=:uid and e.activo=true order by e.apellidos,e.nombres");
         $stmt->execute(['uid' => $user['id']]);
         $students = $stmt->fetchAll();
-        $attendance = $pdo->prepare('select fecha,hora_ingreso,estado from public.asistencias where estudiante_id=:id order by fecha desc limit 30');
+        $attendance = $pdo->prepare('select fecha,hora_ingreso,hora_salida,estado from public.asistencias where estudiante_id=:id order by fecha desc limit 30');
         $alerts = $pdo->prepare('select tipo,mensaje,creado_en,estado from public.alertas where estudiante_id=:id and apoderado_id=:uid order by creado_en desc limit 20');
         foreach ($students as &$student) {
             $attendance->execute(['id' => $student['id']]); $student['asistencias'] = $attendance->fetchAll();
@@ -276,7 +310,7 @@ try {
         require_user(['administrador','tutor']);
         $date = (string)($_GET['date'] ?? date('Y-m-d'));
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) respond(['error' => 'Fecha no válida.'], 422);
-        $stmt = $pdo->prepare("select e.id as estudiante_id,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,g.nombre as grado,g.nivel,a.id as asistencia_id,a.estado,case when a.estado='falta' then null else a.hora_ingreso end as hora_ingreso,a.metodo,guardian.apoderado_id,guardian.telefono as telefono_apoderado,notice.id as alerta_id,notice.estado as alerta_estado from public.estudiantes e left join public.grados g on g.id=e.grado_id left join public.asistencias a on a.estudiante_id=e.id and a.fecha=:day left join lateral (select u.id as apoderado_id,coalesce(nullif(u.telefono,'') ,e.telefono_apoderado) as telefono from public.estudiante_apoderados ea join public.usuarios u on u.id=ea.apoderado_id where ea.estudiante_id=e.id and u.rol='apoderado' and u.activo=true order by (ea.contacto_principal and length(regexp_replace(coalesce(u.telefono,''),'[^0-9]','','g'))>=9) desc,(length(regexp_replace(coalesce(u.telefono,''),'[^0-9]','','g'))>=9) desc,ea.contacto_principal desc,u.id limit 1) guardian on true left join lateral (select al.id,al.estado from public.alertas al where al.asistencia_id=a.id and al.apoderado_id=guardian.apoderado_id and al.tipo='inasistencia' and al.canal='whatsapp' order by al.creado_en desc limit 1) notice on true where e.activo=true order by case lower(g.nivel) when 'primaria' then 1 when 'secundaria' then 2 else 3 end,g.nombre,e.apellidos,e.nombres");
+        $stmt = $pdo->prepare("select e.id as estudiante_id,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,g.nombre as grado,g.nivel,a.id as asistencia_id,a.estado,case when a.estado='falta' then null else a.hora_ingreso end as hora_ingreso,a.hora_salida,a.metodo,guardian.apoderado_id,guardian.telefono as telefono_apoderado,notice.id as alerta_id,notice.estado as alerta_estado from public.estudiantes e left join public.grados g on g.id=e.grado_id left join public.asistencias a on a.estudiante_id=e.id and a.fecha=:day left join lateral (select u.id as apoderado_id,coalesce(nullif(u.telefono,'') ,e.telefono_apoderado) as telefono from public.estudiante_apoderados ea join public.usuarios u on u.id=ea.apoderado_id where ea.estudiante_id=e.id and u.rol='apoderado' and u.activo=true order by (ea.contacto_principal and length(regexp_replace(coalesce(u.telefono,''),'[^0-9]','','g'))>=9) desc,(length(regexp_replace(coalesce(u.telefono,''),'[^0-9]','','g'))>=9) desc,ea.contacto_principal desc,u.id limit 1) guardian on true left join lateral (select al.id,al.estado from public.alertas al where al.asistencia_id=a.id and al.apoderado_id=guardian.apoderado_id and al.tipo='inasistencia' and al.canal='whatsapp' order by al.creado_en desc limit 1) notice on true where e.activo=true order by case lower(g.nivel) when 'primaria' then 1 when 'secundaria' then 2 else 3 end,g.nombre,e.apellidos,e.nombres");
         $stmt->execute(['day' => $date]); $rows = $stmt->fetchAll();
         $summary = ['fecha' => $date, 'matriculados' => count($rows), 'presentes' => 0, 'tardanzas' => 0, 'faltas' => 0, 'sin_registro' => 0, 'justificadas' => 0];
         foreach ($rows as $row) {
@@ -293,7 +327,7 @@ try {
         $date = new DateTimeImmutable($anchor, new DateTimeZone('America/Lima'));
         $start = $period === 'week' ? $date->modify('monday this week')->format('Y-m-d') : ($period === 'month' ? $date->modify('first day of this month')->format('Y-m-d') : $anchor);
         $end = $period === 'week' ? $date->modify('sunday this week')->format('Y-m-d') : ($period === 'month' ? $date->modify('last day of this month')->format('Y-m-d') : $anchor);
-        $stmt = $pdo->prepare("select e.id as estudiante_id,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,g.nombre as grado,g.nivel,count(a.id) filter(where a.estado in ('presente','tardanza')) as asistencias,count(a.id) filter(where a.estado='presente') as presentes,count(a.id) filter(where a.estado='tardanza') as tardanzas,count(a.id) filter(where a.estado='falta') as faltas,count(a.id) filter(where a.estado='justificada') as justificadas,coalesce(json_agg(json_build_object('fecha',a.fecha,'estado',a.estado,'hora',case when a.estado='falta' then null else a.hora_ingreso end) order by a.fecha) filter(where a.id is not null),'[]'::json) as detalle from public.estudiantes e left join public.grados g on g.id=e.grado_id left join public.asistencias a on a.estudiante_id=e.id and a.fecha between :start and :finish where e.activo=true group by e.id,g.nombre,g.nivel order by case lower(g.nivel) when 'primaria' then 1 when 'secundaria' then 2 else 3 end,g.nombre,e.apellidos,e.nombres");
+        $stmt = $pdo->prepare("select e.id as estudiante_id,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,g.nombre as grado,g.nivel,count(a.id) filter(where a.estado in ('presente','tardanza')) as asistencias,count(a.id) filter(where a.estado='presente') as presentes,count(a.id) filter(where a.estado='tardanza') as tardanzas,count(a.id) filter(where a.estado='falta') as faltas,count(a.id) filter(where a.estado='justificada') as justificadas,coalesce(json_agg(json_build_object('fecha',a.fecha,'estado',a.estado,'hora',case when a.estado='falta' then null else a.hora_ingreso end,'hora_salida',a.hora_salida) order by a.fecha) filter(where a.id is not null),'[]'::json) as detalle from public.estudiantes e left join public.grados g on g.id=e.grado_id left join public.asistencias a on a.estudiante_id=e.id and a.fecha between :start and :finish where e.activo=true group by e.id,g.nombre,g.nivel order by case lower(g.nivel) when 'primaria' then 1 when 'secundaria' then 2 else 3 end,g.nombre,e.apellidos,e.nombres");
         $stmt->execute(['start' => $start, 'finish' => $end]); $rows = $stmt->fetchAll();
         $summary = ['inicio' => $start, 'fin' => $end, 'matriculados' => count($rows), 'presentes' => 0, 'tardanzas' => 0, 'faltas' => 0, 'justificadas' => 0];
         foreach ($rows as &$row) { foreach (['asistencias','presentes','tardanzas','faltas','justificadas'] as $field) { $row[$field] = (int)$row[$field]; } if (is_string($row['detalle'])) $row['detalle'] = json_decode($row['detalle'], true) ?: []; foreach (['presentes','tardanzas','faltas','justificadas'] as $field) $summary[$field] += $row[$field]; }
@@ -534,7 +568,7 @@ try {
         respond(['ok' => true, 'resumen' => $counts, 'errores' => array_slice($errors, 0, 30)]);
     }
     if ($action === 'attendance_today' && $_SERVER['REQUEST_METHOD'] === 'GET') {
-        $stmt = $pdo->query("select a.id,a.hora_ingreso,a.estado,a.metodo,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,e.foto_url,g.nombre as grado from public.asistencias a join public.estudiantes e on e.id=a.estudiante_id left join public.grados g on g.id=e.grado_id where e.activo=true and a.fecha=(now() at time zone 'America/Lima')::date and a.estado in ('presente','tardanza') order by a.hora_ingreso desc limit 300");
+        $stmt = $pdo->query("select a.id,a.hora_ingreso,a.hora_salida,a.estado,a.metodo,e.dni,e.codigo,e.nombres,e.apellidos,e.nombre_completo,e.foto_url,g.nombre as grado from public.asistencias a join public.estudiantes e on e.id=a.estudiante_id left join public.grados g on g.id=e.grado_id where e.activo=true and a.fecha=(now() at time zone 'America/Lima')::date and a.estado in ('presente','tardanza') order by a.hora_ingreso desc limit 300");
         respond(['attendance' => $stmt->fetchAll()]);
     }
     if ($action === 'attendance_manual' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -560,7 +594,7 @@ try {
         if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $token)) respond(['error' => 'Este código no corresponde a un carné QR de Grau-Alert.'], 422);
         $student = StudentModel::byQr($pdo, $token);
         if (!$student) respond(['error' => 'QR no reconocido o estudiante inactivo.'], 404);
-        $check = $pdo->prepare("select id,hora_ingreso,estado from public.asistencias where estudiante_id=:id and fecha=(now() at time zone 'America/Lima')::date");
+        $check = $pdo->prepare("select id,hora_ingreso,hora_salida,estado from public.asistencias where estudiante_id=:id and fecha=(now() at time zone 'America/Lima')::date");
         $check->execute(['id' => $student['id']]);
         $student['already_marked'] = $check->fetch() ?: null;
         respond(['student' => $student]);
@@ -574,7 +608,7 @@ try {
         if (!$token) respond(['error' => 'No se encontró un estudiante activo con ese DNI.'], 404);
         $student = StudentModel::byQr($pdo, (string)$token);
         if (!$student) respond(['error' => 'No se encontró un estudiante activo con ese DNI.'], 404);
-        $check = $pdo->prepare("select id,hora_ingreso,estado from public.asistencias where estudiante_id=:id and fecha=(now() at time zone 'America/Lima')::date");
+        $check = $pdo->prepare("select id,hora_ingreso,hora_salida,estado from public.asistencias where estudiante_id=:id and fecha=(now() at time zone 'America/Lima')::date");
         $check->execute(['id' => $student['id']]);
         $student['already_marked'] = $check->fetch() ?: null;
         respond(['student' => $student]);
@@ -602,6 +636,33 @@ try {
         $pdo->commit();
         PushNotification::sendForAttendance($pdo, $student['id'], $attendance['id'], $status === 'tardanza' ? 'tardanza' : 'ingreso', $arrivalMessage);
         respond(['ok' => true, 'attendance' => $attendance]);
+    }
+    if ($action === 'attendance_departure' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $token = trim((string)($data['token'] ?? ''));
+        if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $token)) respond(['error' => 'Este código no corresponde a un carné QR de Grau-Alert.'], 422);
+        $pdo->beginTransaction();
+        try {
+            $lookup = $pdo->prepare("select a.id,a.estudiante_id,a.estado,a.hora_ingreso,a.hora_salida,e.nombres,e.apellidos,e.nombre_completo from public.asistencias a join public.estudiantes e on e.id=a.estudiante_id where e.qr_token=:token and e.activo=true and a.fecha=(now() at time zone 'America/Lima')::date for update of a");
+            $lookup->execute(['token' => $token]);
+            $attendance = $lookup->fetch();
+            if (!$attendance) { $pdo->rollBack(); respond(['error' => 'No hay un ingreso registrado hoy para este estudiante. Registra el ingreso antes de la salida.'], 409); }
+            if (!in_array($attendance['estado'], ['presente','tardanza'], true)) { $pdo->rollBack(); respond(['error' => 'Solo se puede registrar la salida de estudiantes presentes o con tardanza registrada.'], 409); }
+            if ($attendance['hora_salida'] !== null) { $pdo->rollBack(); respond(['error' => 'La salida ya fue registrada hoy a las ' . (new DateTimeImmutable($attendance['hora_salida']))->setTimezone(new DateTimeZone('America/Lima'))->format('H:i') . '.'], 409); }
+            $finish = $pdo->prepare('update public.asistencias set hora_salida=now() where id=:id and hora_salida is null returning hora_salida');
+            $finish->execute(['id' => $attendance['id']]);
+            $departureAt = $finish->fetchColumn();
+            if (!$departureAt) { $pdo->rollBack(); respond(['error' => 'La salida ya fue registrada por otro usuario.'], 409); }
+            $name = trim((string)($attendance['nombre_completo'] ?: ($attendance['nombres'] . ' ' . $attendance['apellidos'])));
+            $time = (new DateTimeImmutable((string)$departureAt))->setTimezone(new DateTimeZone('America/Lima'))->format('H:i');
+            $departureMessage = 'Registró su salida de la institución a las ' . $time . '.';
+            create_guardian_alerts($pdo, $attendance['estudiante_id'], $attendance['id'], 'salida', $departureMessage);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        $pushStatus = PushNotification::sendForAttendance($pdo, $attendance['estudiante_id'], $attendance['id'], 'salida', $departureMessage);
+        respond(['ok' => true, 'salida' => $departureAt, 'estudiante' => $name, 'notificacion' => $pushStatus]);
     }
     respond(['error' => 'Acción no encontrada.'], 404);
 } catch (Throwable $e) {

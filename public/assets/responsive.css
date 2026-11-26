@@ -131,8 +131,17 @@ table {
   .brand-mark.small { width: 32px; height: 32px; font-size: 14px; }
   .nav-link { white-space: nowrap; }
   .main-content { min-width: 0; width: 100%; margin: 0; }
-  .topbar { position: sticky; top: 58px; z-index: 8; width: 100%; height: 44px; padding: 0 13px; }
-  .top-date { max-width: 48%; text-align: right; }
+  .topbar { position: sticky; top: 58px; z-index: 8; width: 100%; height: 50px; padding: 0 13px; gap: 8px; }
+  .topbar-actions { min-width: 0; gap: 8px; }
+  .top-date { display: none; }
+  .account-menu-toggle { gap: 0; padding: 4px; border-radius: 50%; }
+  .account-menu-copy { display: none; }
+  .account-menu-avatar { width: 34px; height: 34px; }
+  .sidebar > .account-menu { position: absolute; z-index: 12; top: 10px; right: 10px; }
+  .sidebar > .account-menu .account-menu-toggle { border-color: #ffffff3d; background: #ffffff14; color: #fff; box-shadow: none; }
+  .sidebar > .account-menu .account-menu-toggle:hover, .sidebar > .account-menu .account-menu-toggle[aria-expanded="true"] { background: #ffffff26; }
+  .sidebar > .account-menu .account-menu-avatar { background: #ffffffed; color: var(--navy); }
+  .account-menu-panel { top: calc(100% + 6px); }
   .page { width: 100%; max-width: 100%; padding: 19px 12px 34px; }
   .page-heading { min-width: 0; align-items: flex-start; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
   .page-heading > div { min-width: 0; }
@@ -149,7 +158,7 @@ table {
   .report-toolbar input, .report-toolbar select { width: 100%; min-width: 0; }
   .report-filters { grid-template-columns: minmax(0, 1fr) !important; }
   .report-filters label, .report-filters input, .report-filters select { width: 100%; min-width: 0; }
-  .community-grid, .scanner-layout, .family-grid { grid-template-columns: minmax(0, 1fr); }
+  .community-grid, .scanner-layout, .family-grid, .profile-grid { grid-template-columns: minmax(0, 1fr); }
   .field-row { grid-template-columns: minmax(0, 1fr); }
   .form-stack, .compact-form { min-width: 0; }
   input, select, textarea { max-width: 100%; }

@@ -66,20 +66,20 @@ final class PushNotification
         }
     }
 
-    public static function sendForAttendance(PDO $db, string $studentId, string $attendanceId, string $kind, string $message): void
+    public static function sendForAttendance(PDO $db, string $studentId, string $attendanceId, string $kind, string $message): string
     {
-        self::sendBatch($db, [['student_id' => $studentId, 'attendance_id' => $attendanceId, 'kind' => $kind, 'message' => $message]]);
+        return self::sendBatch($db, [['student_id' => $studentId, 'attendance_id' => $attendanceId, 'kind' => $kind, 'message' => $message]]);
     }
 
-    public static function sendBatch(PDO $db, array $items): void
+    public static function sendBatch(PDO $db, array $items): string
     {
-        if (!self::configured()) return;
+        if (!self::configured()) return 'not_configured';
         $byStudent = [];
         foreach ($items as $item) {
             $id = (string)($item['student_id'] ?? '');
             if ($id !== '') $byStudent[$id] = $item;
         }
-        if (!$byStudent) return;
+        if (!$byStudent) return 'no_subscription';
         try {
             require_once dirname(__DIR__) . '/vendor/autoload.php';
             $auth = [
@@ -96,14 +96,19 @@ final class PushNotification
             $stmt = $db->prepare("select distinct e.id as student_id,ps.endpoint,ps.p256dh,ps.auth,e.nombres,e.apellidos from public.estudiante_apoderados ea join public.push_subscriptions ps on ps.apoderado_id=ea.apoderado_id join public.estudiantes e on e.id=ea.estudiante_id where ea.estudiante_id in (" . implode(',', $holders) . ')');
             $stmt->execute($params);
             $subscriptions = $stmt->fetchAll();
-            if (!$subscriptions) return;
+            if (!$subscriptions) return 'no_subscription';
             foreach ($subscriptions as $subscriptionRow) {
                 $item = $byStudent[$subscriptionRow['student_id']] ?? null;
                 if (!$item) continue;
                 $kind = (string)($item['kind'] ?? 'ingreso');
                 $attendanceId = (string)($item['attendance_id'] ?? '');
                 $payload = json_encode([
-                    'title' => $kind === 'inasistencia' ? 'Aviso de inasistencia' : ($kind === 'tardanza' ? 'Aviso de tardanza' : 'Aviso de ingreso'),
+                    'title' => match ($kind) {
+                        'inasistencia' => 'Aviso de inasistencia',
+                        'tardanza' => 'Aviso de tardanza',
+                        'salida' => 'Aviso de salida',
+                        default => 'Aviso de ingreso',
+                    },
                     'body' => trim($subscriptionRow['nombres'] . ' ' . $subscriptionRow['apellidos']) . ': ' . (string)($item['message'] ?? ''),
                     'url' => 'familia.php',
                     'tag' => 'asistencia-' . $attendanceId,
@@ -116,8 +121,13 @@ final class PushNotification
                 $webPush->queueNotification($subscription, $payload);
             }
             $expired = [];
+            $delivered = 0;
+            $attempted = 0;
             foreach ($webPush->flush() as $report) {
-                if (!$report->isSuccess() && in_array((int)$report->getResponse()?->getStatusCode(), [404, 410], true)) {
+                $attempted++;
+                if ($report->isSuccess()) {
+                    $delivered++;
+                } elseif (in_array((int)$report->getResponse()?->getStatusCode(), [404, 410], true)) {
                     $expired[] = $report->getEndpoint();
                 } elseif (!$report->isSuccess()) {
                     error_log('Grau-Alert push delivery failed: ' . $report->getReason());
@@ -127,8 +137,10 @@ final class PushNotification
                 $delete = $db->prepare('delete from public.push_subscriptions where endpoint=:endpoint');
                 foreach (array_unique($expired) as $endpoint) $delete->execute(['endpoint' => $endpoint]);
             }
+            return $delivered > 0 ? 'sent' : ($attempted > 0 ? 'failed' : 'no_subscription');
         } catch (Throwable $e) {
             error_log('Grau-Alert push notification: ' . $e->getMessage());
+            return 'failed';
         }
     }
 }
