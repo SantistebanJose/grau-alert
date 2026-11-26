@@ -998,6 +998,7 @@
       if (state.attendanceMode === 'salida') {
         const result = await request('attendance_departure', { method: 'POST', data: { token: state.currentToken } });
         const studentName = result.estudiante || fullName(state.currentStudent) || 'el estudiante';
+        const notificationStatus = result.notificacion ?? result.notification ?? result.push_status ?? '';
         const deliveryMessages = {
           sent: 'Notificación enviada al apoderado.',
           no_subscription: 'El apoderado debe activar notificaciones en su celular.',
@@ -1007,9 +1008,11 @@
           vapid_invalid: 'Render rechazó las claves VAPID; revisa que la clave pública y privada correspondan.',
           rate_limited: 'El servicio push limitó temporalmente los envíos; inténtalo más tarde.',
           push_service_error: 'El servicio push respondió con error; revisa los registros de Render.',
+          failed: 'El servidor no pudo confirmar la entrega. Verifica si el aviso llegó al celular del apoderado.',
         };
-        const delivery = deliveryMessages[result.notificacion] || 'No se pudo entregar el push; revisa los registros de Render.';
-        toast(`Salida registrada para ${studentName}. ${delivery}`, result.notificacion !== 'sent');
+        const delivery = deliveryMessages[notificationStatus] || 'El aviso fue procesado; verifica si llegó al celular del apoderado.';
+        const hardFailure = ['no_subscription', 'subscription_expired', 'runtime_unsupported', 'not_configured', 'vapid_invalid', 'rate_limited', 'push_service_error'].includes(notificationStatus);
+        toast(`Salida registrada para ${studentName}. ${delivery}`, hardFailure);
       } else {
         await request('attendance_confirm', { method: 'POST', data: { token: state.currentToken } });
         toast('Asistencia confirmada.');
