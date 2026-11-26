@@ -921,8 +921,12 @@
         const deliveryMessages = {
           sent: 'Notificación enviada al apoderado.',
           no_subscription: 'El apoderado debe activar notificaciones en su celular.',
+          subscription_expired: 'La suscripción venció; el apoderado debe volver a activar notificaciones.',
           runtime_unsupported: 'Render debe ejecutar PHP 8.2 o superior; revisa el Dockerfile y vuelve a desplegar.',
           not_configured: 'Las notificaciones push no están configuradas en el servidor.',
+          vapid_invalid: 'Render rechazó las claves VAPID; revisa que la clave pública y privada correspondan.',
+          rate_limited: 'El servicio push limitó temporalmente los envíos; inténtalo más tarde.',
+          push_service_error: 'El servicio push respondió con error; revisa los registros de Render.',
         };
         const delivery = deliveryMessages[result.notificacion] || 'No se pudo entregar el push; revisa los registros de Render.';
         toast(`Salida registrada para ${studentName}. ${delivery}`, result.notificacion !== 'sent');

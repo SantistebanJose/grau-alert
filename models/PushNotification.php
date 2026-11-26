@@ -125,21 +125,31 @@ final class PushNotification
             $expired = [];
             $delivered = 0;
             $attempted = 0;
+            $failureCodes = [];
             foreach ($webPush->flush() as $report) {
                 $attempted++;
                 if ($report->isSuccess()) {
                     $delivered++;
-                } elseif (in_array((int)$report->getResponse()?->getStatusCode(), [404, 410], true)) {
+                } else {
+                    $statusCode = (int)($report->getResponse()?->getStatusCode() ?? 0);
+                    $failureCodes[] = $statusCode;
+                    error_log('Grau-Alert push delivery failed (HTTP ' . $statusCode . '): ' . $report->getReason());
+                }
+                if (!$report->isSuccess() && in_array((int)$report->getResponse()?->getStatusCode(), [404, 410], true)) {
                     $expired[] = $report->getEndpoint();
-                } elseif (!$report->isSuccess()) {
-                    error_log('Grau-Alert push delivery failed: ' . $report->getReason());
                 }
             }
             if ($expired) {
                 $delete = $db->prepare('delete from public.push_subscriptions where endpoint=:endpoint');
                 foreach (array_unique($expired) as $endpoint) $delete->execute(['endpoint' => $endpoint]);
             }
-            return $delivered > 0 ? 'sent' : ($attempted > 0 ? 'failed' : 'no_subscription');
+            if ($delivered > 0) return 'sent';
+            if ($attempted === 0) return 'no_subscription';
+            if (count($expired) === $attempted) return 'subscription_expired';
+            if (array_intersect($failureCodes, [401, 403])) return 'vapid_invalid';
+            if (in_array(429, $failureCodes, true)) return 'rate_limited';
+            if (count(array_filter($failureCodes, static fn(int $code): bool => $code >= 500)) > 0) return 'push_service_error';
+            return 'failed';
         } catch (Throwable $e) {
             error_log('Grau-Alert push notification: ' . $e->getMessage());
             return 'failed';
