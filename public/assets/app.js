@@ -94,7 +94,7 @@
       await setPage(initial);
     }
     if (showWelcome) {
-      await new Promise(resolve => setTimeout(resolve, 900));
+      await new Promise(resolve => setTimeout(resolve, 3000));
       hideLoginWelcome();
     }
   }
