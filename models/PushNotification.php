@@ -11,6 +11,7 @@ final class PushNotification
     public static function configurationMessage(): string
     {
         $missing = [];
+        if (PHP_VERSION_ID < 80200) $missing[] = 'El servidor está usando PHP ' . PHP_VERSION . '; las notificaciones push requieren PHP 8.2 o superior. Despliega el servicio con el Dockerfile del proyecto.';
         if (!is_file(dirname(__DIR__) . '/vendor/autoload.php')) $missing[] = 'Falta instalar las dependencias PHP con composer install.';
         if (app_setting('PUSH_VAPID_PUBLIC_KEY') === '' || app_setting('PUSH_VAPID_PRIVATE_KEY') === '') $missing[] = 'Faltan PUSH_VAPID_PUBLIC_KEY y PUSH_VAPID_PRIVATE_KEY en las variables de entorno del servidor.';
         return implode(' ', $missing);
@@ -73,6 +74,7 @@ final class PushNotification
 
     public static function sendBatch(PDO $db, array $items): string
     {
+        if (PHP_VERSION_ID < 80200) return 'runtime_unsupported';
         if (!self::configured()) return 'not_configured';
         $byStudent = [];
         foreach ($items as $item) {

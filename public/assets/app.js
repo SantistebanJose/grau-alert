@@ -917,14 +917,15 @@
     try {
       if (state.attendanceMode === 'salida') {
         const result = await request('attendance_departure', { method: 'POST', data: { token: state.currentToken } });
-        const delivery = result.notificacion === 'sent'
-          ? 'Notificación enviada al apoderado.'
-          : result.notificacion === 'no_subscription'
-            ? 'El apoderado debe activar notificaciones en su celular.'
-            : result.notificacion === 'not_configured'
-              ? 'Las notificaciones push no están configuradas en el servidor.'
-              : 'No se pudo entregar el push; revisa los registros de Render.';
-        toast(`Salida registrada para ${result.estudiante}. ${delivery}`, result.notificacion !== 'sent');
+        const studentName = result.estudiante || fullName(state.currentStudent) || 'el estudiante';
+        const deliveryMessages = {
+          sent: 'Notificación enviada al apoderado.',
+          no_subscription: 'El apoderado debe activar notificaciones en su celular.',
+          runtime_unsupported: 'Render debe ejecutar PHP 8.2 o superior; revisa el Dockerfile y vuelve a desplegar.',
+          not_configured: 'Las notificaciones push no están configuradas en el servidor.',
+        };
+        const delivery = deliveryMessages[result.notificacion] || 'No se pudo entregar el push; revisa los registros de Render.';
+        toast(`Salida registrada para ${studentName}. ${delivery}`, result.notificacion !== 'sent');
       } else {
         await request('attendance_confirm', { method: 'POST', data: { token: state.currentToken } });
         toast('Asistencia confirmada.');
