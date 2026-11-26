@@ -36,11 +36,18 @@
   accountMenuQuery.addEventListener?.('change', positionAccountMenu);
 
   async function boot() {
+    const destinationNames = { dashboard: 'Resumen', students: 'Estudiantes', scanner: 'Marcación de asistencia', community: 'Comunidad escolar', calendar: 'Calendario escolar', reports: 'Reportes', alerts: 'Avisos', family: 'Portal familiar', profile: 'Mi perfil' };
+    const destination = destinationNames[window.INITIAL_PAGE];
+    if (destination) $('#app-loading-message').textContent = `Abriendo ${destination.toLowerCase()}…`;
     try {
       const result = await request('state');
       state.csrf = result.csrf;
       state.dbReady = true;
-      if (result.user) enterApp(result.user, true);
+      if (result.user) {
+        let showWelcome = false;
+        try { showWelcome = sessionStorage.getItem('grau-alert-welcome') === '1'; sessionStorage.removeItem('grau-alert-welcome'); } catch (_) { }
+        enterApp(result.user, showWelcome);
+      }
       else if (result.needs_setup) { $('#app-loading').classList.add('hidden'); $('#auth-screen').classList.remove('hidden'); $('#login-form').classList.add('hidden'); $('#setup-form').classList.remove('hidden'); if (!result.setup_key_required) $('#setup-key-label').classList.add('hidden'); }
       else if (window.INITIAL_PAGE !== 'login') window.location.replace('login.php');
     } catch (e) {
@@ -104,6 +111,7 @@
     try {
       const result = await request(action, { method: 'POST', data });
       if (action === 'login' && window.INITIAL_PAGE === 'login') {
+        try { sessionStorage.setItem('grau-alert-welcome', '1'); } catch (_) { }
         window.location.replace(result.user.rol === 'apoderado' ? 'familia.php' : 'index.php');
         return;
       }
