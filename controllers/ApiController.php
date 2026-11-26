@@ -284,6 +284,55 @@ try {
         $rows = $pdo->query("select u.id,u.correo,u.nombres,u.apellidos,coalesce(nullif(u.telefono,'') ,e.telefono_apoderado) as telefono,u.activo,e.id as estudiante_id,e.dni,e.codigo,e.nombres as estudiante_nombres,e.apellidos as estudiante_apellidos,g.nombre as grado,ea.parentesco,ea.contacto_principal from public.usuarios u join public.estudiante_apoderados ea on ea.apoderado_id=u.id join public.estudiantes e on e.id=ea.estudiante_id left join public.grados g on g.id=e.grado_id where u.rol='apoderado' and e.activo=true order by u.apellidos,e.apellidos")->fetchAll();
         respond(['guardians' => $rows]);
     }
+    if ($action === 'guardian_link_update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        require_user(['administrador']);
+        $guardianId = trim((string)($data['guardian_id'] ?? ''));
+        $studentId = trim((string)($data['student_id'] ?? ''));
+        $relation = trim((string)($data['parentesco'] ?? ''));
+        if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $guardianId) || !preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $studentId)) respond(['error' => 'El vínculo seleccionado no es válido.'], 422);
+        if (mb_strlen($relation) > 80) respond(['error' => 'El parentesco no puede superar 80 caracteres.'], 422);
+        $primary = filter_var($data['contacto_principal'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $pdo->beginTransaction();
+        try {
+            $exists = $pdo->prepare('select 1 from public.estudiante_apoderados where estudiante_id=:student and apoderado_id=:guardian');
+            $exists->execute(['student' => $studentId, 'guardian' => $guardianId]);
+            if (!$exists->fetchColumn()) { $pdo->rollBack(); respond(['error' => 'Ese vínculo ya no existe. Actualiza el listado e inténtalo otra vez.'], 404); }
+            if ($primary) {
+                $clearPrimary = $pdo->prepare('update public.estudiante_apoderados set contacto_principal=false where estudiante_id=:student and apoderado_id<>:guardian');
+                $clearPrimary->execute(['student' => $studentId, 'guardian' => $guardianId]);
+            }
+            $update = $pdo->prepare('update public.estudiante_apoderados set parentesco=:relation,contacto_principal=:primary where estudiante_id=:student and apoderado_id=:guardian');
+            $update->execute(['relation' => $relation !== '' ? $relation : null, 'primary' => $primary, 'student' => $studentId, 'guardian' => $guardianId]);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        respond(['ok' => true]);
+    }
+    if ($action === 'guardian_unlink' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        require_user(['administrador']);
+        $guardianId = trim((string)($data['guardian_id'] ?? ''));
+        $studentId = trim((string)($data['student_id'] ?? ''));
+        if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $guardianId) || !preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $studentId)) respond(['error' => 'El vínculo seleccionado no es válido.'], 422);
+        $pdo->beginTransaction();
+        try {
+            $delete = $pdo->prepare('delete from public.estudiante_apoderados where estudiante_id=:student and apoderado_id=:guardian returning contacto_principal');
+            $delete->execute(['student' => $studentId, 'guardian' => $guardianId]);
+            $deletedLink = $delete->fetch(PDO::FETCH_ASSOC);
+            if (!$deletedLink) { $pdo->rollBack(); respond(['error' => 'Ese vínculo ya no existe. Actualiza el listado e inténtalo otra vez.'], 404); }
+            $wasPrimary = $deletedLink['contacto_principal'];
+            if ($wasPrimary === true || in_array(strtolower((string)$wasPrimary), ['t', 'true', '1'], true)) {
+                $promote = $pdo->prepare('update public.estudiante_apoderados set contacto_principal=true where estudiante_id=:student and apoderado_id=(select apoderado_id from public.estudiante_apoderados where estudiante_id=:student2 order by creado_en,apoderado_id limit 1) and not exists (select 1 from public.estudiante_apoderados where estudiante_id=:student3 and contacto_principal=true)');
+                $promote->execute(['student' => $studentId, 'student2' => $studentId, 'student3' => $studentId]);
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        respond(['ok' => true]);
+    }
     if ($action === 'guardian_reset_password' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         require_user(['administrador']);
         $guardianId = trim((string)($data['guardian_id'] ?? ''));

@@ -362,6 +362,29 @@
     } catch (err) { toast(err.message, true); }
     finally { button.disabled = false; button.textContent = 'Importar datos'; }
   });
+  function guardianLinkDialog() {
+    let dialog = $('#guardian-link-dialog');
+    if (dialog) return dialog;
+    dialog = document.createElement('dialog');
+    dialog.id = 'guardian-link-dialog';
+    dialog.className = 'modal';
+    dialog.innerHTML = `<form id="guardian-link-edit-form"><div class="modal-heading"><div><p class="eyebrow">VÍNCULO FAMILIAR</p><h2>Editar vínculo</h2></div><button type="button" class="icon-btn" data-close-link-dialog aria-label="Cerrar">×</button></div><input type="hidden" name="guardian_id"><input type="hidden" name="student_id"><div class="form-stack"><p id="guardian-link-edit-summary" class="form-note"></p><label>Parentesco<input name="parentesco" maxlength="80" placeholder="Madre, padre, tutor..."></label><label class="checkbox-label"><input name="contacto_principal" type="checkbox"> Contacto principal para este estudiante</label></div><div class="modal-actions"><button type="button" class="btn btn-ghost" data-close-link-dialog>Cancelar</button><button type="submit" class="btn btn-primary">Guardar vínculo</button></div></form>`;
+    document.body.append(dialog);
+    dialog.querySelectorAll('[data-close-link-dialog]').forEach(button => button.addEventListener('click', () => dialog.close()));
+    dialog.querySelector('form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = Object.fromEntries(new FormData(form).entries());
+      data.contacto_principal = form.elements.contacto_principal.checked;
+      const submit = form.querySelector('[type="submit"]'); submit.disabled = true;
+      try {
+        await request('guardian_link_update', { method: 'POST', data });
+        dialog.close(); toast('Vínculo actualizado.'); await loadCommunity();
+      } catch (error) { toast(error.message, true); }
+      finally { submit.disabled = false; }
+    });
+    return dialog;
+  }
   async function loadCommunity() {
     try {
       const [staff, guardians, students] = await Promise.all([request('staff'), request('guardians'), request('students')]);
@@ -374,7 +397,29 @@
       });
       state.communityGuardians = [...uniqueGuardians.values()];
       $('#staff-rows').innerHTML = staff.staff.map(u => `<tr><td>${esc(`${u.nombres} ${u.apellidos}`)}</td><td>${esc(u.correo)}</td><td>${esc(u.rol)}</td><td>${esc(u.telefono || '—')}</td></tr>`).join('');
-      $('#guardian-rows').innerHTML = guardians.guardians.map(g => `<tr><td>${esc(`${g.nombres} ${g.apellidos}`)}</td><td>${esc(g.correo)}</td><td>${esc(`${g.estudiante_nombres} ${g.estudiante_apellidos}`)}</td><td>${esc(g.grado || '—')}</td><td>${esc(g.telefono || '—')}${g.contacto_principal ? ' · Principal' : ''}</td><td><button type="button" class="btn btn-ghost guardian-reset-password" data-guardian-id="${esc(g.id)}">Nueva clave</button></td></tr>`).join('');
+      const guardianHeader = $('#guardian-rows').closest('table').querySelector('thead tr');
+      if (!guardianHeader.querySelector('[data-guardian-actions-heading]')) guardianHeader.insertAdjacentHTML('beforeend', '<th data-guardian-actions-heading>ACCIONES</th>');
+      $('#guardian-rows').innerHTML = guardians.guardians.map(g => `<tr><td>${esc(`${g.nombres} ${g.apellidos}`)}</td><td>${esc(g.correo)}</td><td>${esc(`${g.estudiante_nombres} ${g.estudiante_apellidos}`)}</td><td>${esc(g.grado || '—')}</td><td>${esc(g.telefono || '—')}${g.contacto_principal ? ' · Principal' : ''}</td><td><button type="button" class="btn btn-ghost guardian-reset-password" data-guardian-id="${esc(g.id)}">Nueva clave</button></td><td><div class="row-actions"><button type="button" class="qr-action" data-edit-guardian-link="${esc(g.id)}" data-link-student="${esc(g.estudiante_id)}">Editar vínculo</button><button type="button" class="qr-action danger-action" data-remove-guardian-link="${esc(g.id)}" data-link-student="${esc(g.estudiante_id)}">Quitar</button></div></td></tr>`).join('');
+      $$('[data-edit-guardian-link]').forEach(button => button.addEventListener('click', () => {
+        const link = guardians.guardians.find(item => item.id === button.dataset.editGuardianLink && item.estudiante_id === button.dataset.linkStudent);
+        if (!link) return;
+        const dialog = guardianLinkDialog(), form = $('#guardian-link-edit-form', dialog);
+        form.elements.guardian_id.value = link.id;
+        form.elements.student_id.value = link.estudiante_id;
+        form.elements.parentesco.value = link.parentesco || '';
+        form.elements.contacto_principal.checked = link.contacto_principal === true || ['t', 'true', '1'].includes(String(link.contacto_principal).toLowerCase());
+        $('#guardian-link-edit-summary', dialog).textContent = `${link.nombres} ${link.apellidos} · ${link.estudiante_nombres} ${link.estudiante_apellidos}`;
+        dialog.showModal();
+      }));
+      $$('[data-remove-guardian-link]').forEach(button => button.addEventListener('click', async () => {
+        const link = guardians.guardians.find(item => item.id === button.dataset.removeGuardianLink && item.estudiante_id === button.dataset.linkStudent);
+        if (!link || !confirm(`¿Quitar el vínculo de ${link.nombres} ${link.apellidos} con ${link.estudiante_nombres} ${link.estudiante_apellidos}? La cuenta del apoderado y sus otros vínculos se conservarán.`)) return;
+        button.disabled = true;
+        try {
+          await request('guardian_unlink', { method: 'POST', data: { guardian_id: link.id, student_id: link.estudiante_id } });
+          toast('Vínculo quitado. La cuenta del apoderado se conservó.'); await loadCommunity();
+        } catch (error) { button.disabled = false; toast(error.message, true); }
+      }));
       $$('.guardian-reset-password').forEach(button => button.addEventListener('click', async () => {
         if (!confirm('Se reemplazará la clave actual. ¿Generar una nueva clave temporal?')) return;
         button.disabled = true;
