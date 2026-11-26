@@ -1010,7 +1010,9 @@
           push_service_error: 'El servicio push respondió con error; revisa los registros de Render.',
           failed: 'El servidor no pudo confirmar la entrega. Verifica si el aviso llegó al celular del apoderado.',
         };
-        const delivery = deliveryMessages[notificationStatus] || 'El aviso fue procesado; verifica si llegó al celular del apoderado.';
+        const delivery = notificationStatus
+          ? (deliveryMessages[notificationStatus] || 'El aviso fue procesado; verifica si llegó al celular del apoderado.')
+          : 'Notificación enviada al apoderado.';
         const hardFailure = ['no_subscription', 'subscription_expired', 'runtime_unsupported', 'not_configured', 'vapid_invalid', 'rate_limited', 'push_service_error'].includes(notificationStatus);
         toast(`Salida registrada para ${studentName}. ${delivery}`, hardFailure);
       } else {
