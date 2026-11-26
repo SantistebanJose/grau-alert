@@ -40,7 +40,7 @@
       const result = await request('state');
       state.csrf = result.csrf;
       state.dbReady = true;
-      if (result.user) enterApp(result.user);
+      if (result.user) enterApp(result.user, true);
       else if (result.needs_setup) { $('#app-loading').classList.add('hidden'); $('#auth-screen').classList.remove('hidden'); $('#login-form').classList.add('hidden'); $('#setup-form').classList.remove('hidden'); if (!result.setup_key_required) $('#setup-key-label').classList.add('hidden'); }
       else if (window.INITIAL_PAGE !== 'login') window.location.replace('login.php');
     } catch (e) {
@@ -52,10 +52,25 @@
       toast(e.message, true);
     }
   }
-  function enterApp(user) {
+  function showLoginWelcome(user) {
+    const loading = $('#app-loading');
+    const name = `${user.nombres || ''} ${user.apellidos || ''}`.trim();
+    $('#app-loading-title').textContent = `¡Bienvenido, ${name || 'a Grau-Alert'}!`;
+    $('#app-loading-message').textContent = '';
+    loading.classList.remove('hidden');
+  }
+  function hideLoginWelcome() {
+    const loading = $('#app-loading');
+    loading.classList.add('hidden');
+    $('#app-loading-title').textContent = '';
+    $('#app-loading-message').textContent = 'Verificando tu sesión…';
+  }
+  async function enterApp(user, showWelcome = false) {
     state.user = user;
-    $('#auth-screen').classList.add('hidden'); $('#app-loading').classList.add('hidden'); $('#app').classList.remove('hidden');
+    $('#auth-screen').classList.add('hidden');
     if (window.INITIAL_PAGE === 'login') { window.location.replace(user.rol === 'apoderado' ? 'familia.php' : 'index.php'); return; }
+    if (showWelcome) showLoginWelcome(user); else $('#app-loading').classList.add('hidden');
+    $('#app').classList.remove('hidden');
     $('#user-name').textContent = `${user.nombres} ${user.apellidos}`;
     $('#greeting-name').textContent = user.nombres.split(' ')[0];
     $('#user-role').textContent = user.rol;
@@ -70,19 +85,31 @@
       $$('.page').forEach(el => { if (!['page-family', 'page-profile'].includes(el.id)) el.classList.add('hidden'); });
       $$('.nav-link').forEach(el => { if (!el.classList.contains('family-only')) el.classList.add('hidden'); });
       $('#family-name').textContent = user.nombres.split(' ')[0];
-      setPage(window.INITIAL_PAGE === 'profile' ? 'profile' : 'family');
+      await setPage(window.INITIAL_PAGE === 'profile' ? 'profile' : 'family');
     } else {
       let initial = window.INITIAL_PAGE || 'dashboard';
       if (user.rol === 'auxiliar' && ['community', 'calendar', 'reports', 'alerts', 'family'].includes(initial)) initial = 'dashboard';
       if (user.rol === 'tutor' && ['community', 'calendar', 'family'].includes(initial)) initial = 'dashboard';
       if (user.rol !== 'apoderado' && initial === 'family') initial = 'dashboard';
-      setPage(initial);
+      await setPage(initial);
+    }
+    if (showWelcome) {
+      await new Promise(resolve => setTimeout(resolve, 900));
+      hideLoginWelcome();
     }
   }
   async function authSubmit(form, action) {
     if (!state.dbReady) { toast('Primero debe quedar activa la conexión con PostgreSQL.', true); return; }
     const data = Object.fromEntries(new FormData(form).entries());
-    try { const result = await request(action, { method: 'POST', data }); enterApp(result.user); toast(action === 'setup' ? 'Administrador creado.' : 'Sesión iniciada.'); }
+    try {
+      const result = await request(action, { method: 'POST', data });
+      if (action === 'login' && window.INITIAL_PAGE === 'login') {
+        window.location.replace(result.user.rol === 'apoderado' ? 'familia.php' : 'index.php');
+        return;
+      }
+      await enterApp(result.user, true);
+      toast(action === 'setup' ? 'Administrador creado.' : 'Sesión iniciada.');
+    }
     catch (e) { toast(e.message, true); }
   }
   $('#login-form').addEventListener('submit', e => { e.preventDefault(); authSubmit(e.currentTarget, 'login'); });
@@ -143,19 +170,19 @@
     } catch (error) { toast(error.message, true); }
   });
 
-  function setPage(name) {
+  async function setPage(name) {
     $$('.page').forEach(p => p.classList.add('hidden'));
     $(`#page-${name}`).classList.remove('hidden');
     $$('.nav-link').forEach(b => b.classList.toggle('active', b.dataset.page === name));
     $('#page-title').textContent = ({ dashboard: 'Resumen', students: 'Estudiantes', scanner: 'Marcar asistencia', community: 'Comunidad escolar', calendar: 'Calendario escolar', reports: 'Reportes', alerts: 'Avisos', family: 'Portal familiar', profile: 'Mi perfil' })[name];
-    if (name === 'students') { loadStudents(); loadGrades(); }
-    if (name === 'dashboard') loadDashboard();
-    if (name === 'community') loadCommunity();
-    if (name === 'calendar') loadCalendar();
-    if (name === 'reports') loadReport();
-    if (name === 'alerts') loadAlerts();
-    if (name === 'family') loadFamily();
-    if (name === 'profile') loadProfileForm();
+    if (name === 'students') await Promise.all([loadStudents(), loadGrades()]);
+    if (name === 'dashboard') await loadDashboard();
+    if (name === 'community') await loadCommunity();
+    if (name === 'calendar') await loadCalendar();
+    if (name === 'reports') await loadReport();
+    if (name === 'alerts') await loadAlerts();
+    if (name === 'family') await loadFamily();
+    if (name === 'profile') await loadProfileForm();
     if (name === 'scanner') startScanner(); else stopScanner();
   }
   $$('[data-goto]').forEach(b => b.addEventListener('click', () => { const links = { dashboard: 'index.php', students: 'estudiantes.php', scanner: 'asistencia.php', community: 'comunidad.php', calendar: 'calendario.php', reports: 'reportes.php', alerts: 'avisos.php', family: 'familia.php', profile: 'perfil.php' }; location.href = links[b.dataset.goto] || 'index.php'; }));

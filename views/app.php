@@ -5,7 +5,7 @@
   <meta name="theme-color" content="#102454"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="public/assets/img/mgs.jpg"><title>Grau-Alert | Asistencia</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="public/assets/app.css?v=20261126-2"><link rel="stylesheet" href="public/assets/fixes.css"><link rel="stylesheet" href="public/assets/student-tabs.css?v=20261110"><link rel="stylesheet" href="public/assets/initial-state.css?v=20261110"><link rel="stylesheet" href="public/assets/reports.css?v=20261125"><link rel="stylesheet" href="public/assets/student-picker.css?v=20261110-3"><link rel="stylesheet" href="public/assets/responsive.css?v=20261126-3">
+  <link rel="stylesheet" href="public/assets/app.css?v=20261126-2"><link rel="stylesheet" href="public/assets/fixes.css"><link rel="stylesheet" href="public/assets/student-tabs.css?v=20261110"><link rel="stylesheet" href="public/assets/initial-state.css?v=20261126-welcome"><link rel="stylesheet" href="public/assets/reports.css?v=20261125"><link rel="stylesheet" href="public/assets/student-picker.css?v=20261110-3"><link rel="stylesheet" href="public/assets/responsive.css?v=20261126-3">
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -17,7 +17,7 @@
     </div></section>
   </main>
 
-  <div id="app-loading" class="app-loading <?= ($initialPage ?? 'dashboard') === 'login' ? 'hidden' : '' ?>" role="status" aria-live="polite"><span class="app-loading-mark">MG</span><span class="app-loading-spinner" aria-hidden="true"></span><b>Grau-Alert</b><span>Verificando tu sesión…</span></div>
+  <div id="app-loading" class="app-loading <?= ($initialPage ?? 'dashboard') === 'login' ? 'hidden' : '' ?>" role="status" aria-live="polite"><img class="app-loading-gif" src="public/assets/img/grau-alert.gif" alt=""><strong id="app-loading-title"></strong><span id="app-loading-message">Verificando tu sesión…</span></div>
   <div id="app" class="app-shell hidden">
     <aside class="sidebar"><a class="sidebar-brand" href="index.php" aria-label="Ir a la página principal"><img class="brand-crest tiny" src="public/assets/img/mgs.jpg" alt=""><div class="sidebar-brand-copy"><b>Grau-Alert</b><span>I.E. 10165</span></div></a>
       <button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu-panel"><span aria-hidden="true">☰</span><span class="mobile-menu-label">Menú</span></button>
